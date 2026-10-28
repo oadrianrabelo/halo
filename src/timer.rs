@@ -43,6 +43,13 @@ pub struct Settings {
     pub lyrics_offset: f32,
     /// Meta de focos por dia (Histórico).
     pub daily_goal: u32,
+    /// Mostra o ícone na bandeja do sistema.
+    pub tray: bool,
+    /// O botão de minimizar esconde na bandeja em vez da barra de tarefas.
+    pub minimize_to_tray: bool,
+    pub auto_update: bool,
+    /// Última versão aberta, para mostrar as novidades depois de atualizar.
+    pub last_version: String,
 }
 
 impl Default for Settings {
@@ -61,6 +68,10 @@ impl Default for Settings {
             lyrics: true,
             lyrics_offset: 0.0,
             daily_goal: 8,
+            tray: true,
+            minimize_to_tray: true,
+            auto_update: true,
+            last_version: String::new(),
         }
     }
 }

@@ -8,7 +8,6 @@ const API: &str = "https://lrclib.net/api";
 fn api() -> String {
     std::env::var("HALO_LYRICS_API").unwrap_or_else(|_| API.to_owned())
 }
-const USER_AGENT: &str = "Halo (https://github.com/oadrianrabelo/pomodoro)";
 
 #[derive(Debug, PartialEq)]
 pub struct Lyrics {
@@ -58,11 +57,7 @@ pub fn fetch(track: &Track) -> Option<Lyrics> {
     if track.title.trim().is_empty() {
         return None;
     }
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(8)))
-        .user_agent(USER_AGENT)
-        .build()
-        .into();
+    let agent = crate::http::agent(Duration::from_secs(8));
 
     // 1) Busca exata (mais rápida e precisa).
     let mut req = agent

@@ -17,18 +17,21 @@ pub enum Tab {
     Sound,
     Music,
     History,
+    About,
 }
 
 pub struct State {
     pub open: bool,
     pub tab: Tab,
+    /// Acabou de atualizar: destaca as novidades na aba Sobre.
+    pub whats_new: bool,
     /// Caminho de fonte sendo digitado (só aplica ao confirmar).
     font_path: String,
 }
 
 impl Default for State {
     fn default() -> Self {
-        Self { open: false, tab: Tab::Timer, font_path: String::new() }
+        Self { open: false, tab: Tab::Timer, whats_new: false, font_path: String::new() }
     }
 }
 
@@ -112,7 +115,7 @@ pub fn accent(theme: &Theme) -> Color32 {
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let builder = egui::ViewportBuilder::default()
         .with_title("Preferências")
-        .with_inner_size([480.0, 600.0])
+        .with_inner_size([540.0, 620.0])
         .with_min_inner_size([380.0, 420.0])
         .with_always_on_top();
     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("prefs"), builder, |ui, _class| {
@@ -158,6 +161,7 @@ fn content(app: &mut App, ui: &mut egui::Ui) {
             (Tab::Sound, "Som"),
             (Tab::Music, "Música"),
             (Tab::History, "Histórico"),
+            (Tab::About, "Sobre"),
         ],
         width,
     );
@@ -174,6 +178,7 @@ fn content(app: &mut App, ui: &mut egui::Ui) {
             Tab::Sound => sound_tab(app, ui),
             Tab::Music => music_tab(app, ui),
             Tab::History => history_tab(app, ui),
+            Tab::About => about_tab(app, ui),
         });
 
     ui.add_space(8.0);
@@ -186,6 +191,9 @@ fn content(app: &mut App, ui: &mut egui::Ui) {
                 }
                 Tab::History => {
                     app.settings.daily_goal = Settings::default().daily_goal;
+                }
+                Tab::About => {
+                    app.settings.auto_update = true;
                 }
                 Tab::Timer | Tab::Sound | Tab::Music => {
                     let keep_on_top = app.settings.always_on_top;
@@ -398,6 +406,10 @@ fn window_tab(app: &mut App, ui: &mut egui::Ui) {
     let accent = accent(&app.theme);
     group(ui, "JANELA", |rows| {
         rows.row("Sempre no topo", |ui| w::switch(ui, &mut app.settings.always_on_top, accent));
+        rows.row("Ícone na bandeja do sistema", |ui| w::switch(ui, &mut app.settings.tray, accent));
+        if app.settings.tray {
+            rows.row("Minimizar para a bandeja", |ui| w::switch(ui, &mut app.settings.minimize_to_tray, accent));
+        }
         rows.row("Efeito vidro", |ui| {
             ui.add_enabled_ui(glass::supported(), |ui| {
                 let was = app.theme.glass;
@@ -618,6 +630,125 @@ fn summary(ui: &mut egui::Ui, title: &str, value: &str, sub: &str) {
             ui.label(RichText::new(value).size(26.0).strong());
             ui.label(RichText::new(sub).size(11.0).color(ui.visuals().weak_text_color()));
         });
+}
+
+fn about_tab(app: &mut App, ui: &mut egui::Ui) {
+    use crate::update::{self, State};
+    let accent = accent(&app.theme);
+
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(vec2(56.0, 56.0), egui::Sense::hover());
+        let tex = ui.ctx().data_mut(|d| d.get_temp::<egui::TextureHandle>(egui::Id::unique("app-icon"))).unwrap_or_else(|| {
+            let img = egui::ColorImage::from_rgba_unmultiplied([128, 128], &crate::icon::render(128, crate::icon::Spec::APP));
+            let t = ui.ctx().load_texture("app-icon", img, Default::default());
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("app-icon"), t.clone()));
+            t
+        });
+        ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+        ui.vertical(|ui| {
+            ui.add_space(6.0);
+            ui.label(RichText::new("Halo").size(20.0).strong());
+            ui.label(RichText::new(format!("Versão {}", update::VERSION)).color(ui.visuals().weak_text_color()));
+        });
+    });
+    ui.add_space(6.0);
+
+    group(ui, "ATUALIZAÇÕES", |rows| {
+        rows.row("Procurar automaticamente", |ui| w::switch(ui, &mut app.settings.auto_update, accent));
+        rows.full(|ui| {
+            let state = app.updater.state();
+            match &state {
+                State::Idle => {
+                    ui.label("Ainda não procurou nesta sessão.");
+                }
+                State::Checking => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Procurando…");
+                    });
+                }
+                State::UpToDate => {
+                    ui.label("Você está na versão mais recente.");
+                }
+                State::Downloading => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Baixando a versão nova…");
+                    });
+                }
+                State::Ready => {
+                    ui.label("Pronto! Reabrindo o Halo…");
+                }
+                State::Failed(e) => {
+                    ui.colored_label(Color32::from_rgb(255, 69, 58), format!("Não deu certo: {e}"));
+                }
+                State::Available(r) => {
+                    ui.label(RichText::new(format!("Versão {} disponível", r.version)).strong().color(accent));
+                    if !r.notes.is_empty() {
+                        ui.add_space(4.0);
+                        notes(ui, r.notes.lines());
+                    }
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if r.download.is_some() && ui.button(RichText::new("Atualizar agora").strong()).clicked() {
+                            app.updater.install(r.clone());
+                        }
+                        if ui.button("Ver no GitHub").clicked() {
+                            update::open(&r.page);
+                        }
+                    });
+                }
+            }
+            if !matches!(state, State::Checking | State::Downloading | State::Ready | State::Available(_)) {
+                ui.add_space(4.0);
+                if ui.button("Procurar agora").clicked() {
+                    app.updater.check();
+                }
+            }
+        });
+    });
+
+    let title = if app.prefs.whats_new { "NOVIDADES DESTA VERSÃO" } else { "NOVIDADES" };
+    let log = update::changelog();
+    group(ui, title, |rows| {
+        for (i, (version, lines)) in log.iter().take(4).enumerate() {
+            rows.full(|ui| {
+                let strong = i == 0;
+                ui.label(RichText::new(version).strong().color(if strong { accent } else { ui.visuals().text_color() }));
+                notes(ui, lines.iter().map(String::as_str));
+            });
+        }
+    });
+
+    group(ui, "DIAGNÓSTICO", |rows| {
+        rows.row("Modo de desenho", |ui| ui.label(RichText::new(app.mode.name()).color(ui.visuals().weak_text_color())));
+        rows.row("Log", |ui| {
+            if ui.button("Abrir pasta").clicked() {
+                update::open(&crate::logging::data_dir().display().to_string());
+            }
+        });
+        rows.row("Testar o modo normal de novo", |ui| {
+            if ui.button("Redefinir").clicked() {
+                crate::render::reset();
+            }
+        });
+    });
+    hint(ui, "Se o Halo não abrir direito, ele tenta sozinho outros modos de desenho. \"Redefinir\" faz ele tentar o modo normal na próxima abertura.");
+}
+
+/// Lista de novidades (linhas de Markdown simples, com "- " no começo).
+fn notes<'a>(ui: &mut egui::Ui, lines: impl Iterator<Item = &'a str>) {
+    for line in lines {
+        let text = line.trim().trim_start_matches(['-', '*']).trim();
+        if text.is_empty() || text.starts_with('#') {
+            continue;
+        }
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.label(RichText::new("•").color(ui.visuals().weak_text_color()));
+            ui.label(text);
+        });
+    }
 }
 
 fn hint(ui: &mut egui::Ui, text: &str) {

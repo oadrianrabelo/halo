@@ -1,3 +1,5 @@
+<img src="assets/halo.png" width="96" align="right" alt="">
+
 # Halo
 
 Um pomodoro flutuante, bonito e minúsculo para Windows, Linux e macOS, com a música que está tocando e a letra sincronizada.
@@ -5,7 +7,7 @@ Um pomodoro flutuante, bonito e minúsculo para Windows, Linux e macOS, com a m�
 ![Estilo Clássico](docs/classico.png)
 ![Estilo Fluido](docs/fluido.png)
 
-- **Leve de verdade:** um único executável de ~7 MB, sem navegador nem WebView por baixo.
+- **Leve de verdade:** um único executável (5–10 MB), sem navegador nem WebView por baixo.
   Com o timer parado, não gasta CPU. Rodando, redesenha uma vez por segundo.
 - **Flutuante:** fica por cima das outras janelas, sem borda. Arraste por qualquer lugar.
 - **Dois estilos visuais**
@@ -18,6 +20,9 @@ Um pomodoro flutuante, bonito e minúsculo para Windows, Linux e macOS, com a m�
 - **Tocando agora + letra sincronizada:** mostra a música do sistema (Spotify, navegador, etc.) com a linha
   atual da letra, buscada no [LRCLIB](https://lrclib.net). Controles de anterior, play/pausa e próxima ao passar o mouse.
 - **Histórico:** focos de hoje, sequência de dias, meta diária, gráfico da semana e grade das últimas 16 semanas.
+- **Bandeja do sistema:** o ícone mostra o progresso do timer, a dica mostra o tempo restante e o menu
+  inicia, pausa, pula e abre as Preferências. Dá para minimizar o Halo para lá.
+- **Atualização automática** com as novidades de cada versão (Preferências → Sobre).
 - Tudo fica salvo: configurações, tema, histórico e posição da janela.
 
 ## Como usar
@@ -37,13 +42,31 @@ Os controles somem enquanto o timer roda e voltam quando o mouse passa por cima 
 
 ## Download
 
-Baixe o executável do seu sistema na página de **Releases**:
+Na página de **Releases**:
 
-- Windows: `halo-windows-x64.exe`
-- Linux: `halo-linux-x64` (rode `chmod +x halo-linux-x64` antes)
-- macOS: `halo-macos-arm64` (Apple Silicon) ou `halo-macos-intel`
+- **Windows:** `halo-setup-windows-x64.exe` (instalador, recomendado) ou `halo-windows-x64.exe` (portátil).
+  O instalador não pede administrador, cria atalho no menu Iniciar e tem a opção de abrir junto com o Windows.
+  Na primeira vez o Windows pode avisar que o app não é reconhecido: clique em **Mais informações → Executar assim mesmo**.
+- **Linux:** `halo-linux-x64` (rode `chmod +x halo-linux-x64` antes)
+- **macOS:** `halo-macos-arm64` (Apple Silicon) ou `halo-macos-intel`
 
 > No macOS o binário não é assinado. Na primeira vez, clique com o botão direito → Abrir.
+
+## Se algo der errado
+
+O Halo grava um log em:
+
+- Windows: `%LOCALAPPDATA%\Halo\halo.log`
+- macOS: `~/Library/Application Support/Halo/halo.log`
+- Linux: `~/.local/share/halo/halo.log`
+
+Também dá para abrir a pasta em Preferências → Sobre.
+
+Se a janela não abrir com OpenGL (comum em computadores antigos), o Halo tenta sozinho outros modos:
+OpenGL sem transparência, DirectX e, por último, desenho por software (WARP, que funciona em qualquer
+Windows 10 ou mais novo). Ele lembra o modo que funcionou. Se o driver travar o processo de vez,
+abra o Halo de novo: ele pula o modo que falhou. Para forçar um modo, use a variável de ambiente
+`HALO_RENDERER` (`glow`, `glow-opaco`, `directx` ou `software`).
 
 ## Compilar
 
@@ -55,8 +78,15 @@ cargo run --release
 
 No Linux, instale antes: `libxkbcommon-dev libgl1-mesa-dev libwayland-dev libssl-dev pkg-config`.
 
-A cada push na `main`, o GitHub Actions compila os três sistemas e publica (ou atualiza) a release
-com a versão do `Cargo.toml`. Para lançar uma versão nova, basta mudar o `version` lá.
+A cada push na `main`, o GitHub Actions compila os três sistemas, gera o instalador do Windows e publica
+(ou atualiza) a release com a versão do `Cargo.toml`. As notas da release vêm da seção daquela versão no
+`CHANGELOG.md`, e o próprio app mostra essas novidades depois de atualizar.
+
+Para lançar uma versão nova: suba o `version` no `Cargo.toml` e escreva a seção dela no topo do `CHANGELOG.md`
+(um teste garante que os dois batem).
+
+O ícone é desenhado em código (`src/icon.rs`). Depois de mudar o desenho, gere de novo os arquivos com
+`cargo run --example make_icon`.
 
 ## Por que não Tauri/Electron?
 
@@ -106,4 +136,11 @@ src/
   fonts.rs    carrega a fonte do sistema ou um arquivo
   glass.rs    desfoque nativo (Windows/macOS)
   sound.rs    aviso sonoro usando o som do próprio sistema
+  tray.rs     ícone na bandeja com o progresso
+  update.rs   atualização automática e novidades
+  render.rs   escolha do renderizador, com planos B, C e D
+  logging.rs  log em arquivo e captura de travamentos
+  icon.rs     desenho do ícone
+installer/    instalador do Windows (Inno Setup)
+CHANGELOG.md  novidades de cada versão
 ```

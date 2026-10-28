@@ -4,6 +4,9 @@ use crate::timer::{Phase, Settings, Timer, format_mmss};
 use crate::widgets::{self as w, Icon, TrafficAction};
 use crate::media::{self, LyricsState, Media};
 use crate::stats::{self, Stats};
+use crate::render::{self, Mode};
+use crate::tray::{self, Tray};
+use crate::update::{self, Updater};
 use crate::{fonts, glass, prefs, sound};
 use eframe::egui::{
     self, Align2, Color32, CornerRadius, FontId, Id, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2, emath::easing, pos2,
@@ -40,6 +43,17 @@ pub struct App {
     media_lyrics: bool,
     /// Linha da letra atual e quando ela mudou (para animar).
     lyric: (Option<usize>, Instant),
+    pub mode: Mode,
+    first_frame: bool,
+    tray: Option<Tray>,
+    /// Já tentou criar a bandeja e o sistema não tem uma.
+    tray_unavailable: bool,
+    /// Janela escondida na bandeja.
+    hidden: bool,
+    pub updater: Updater,
+    next_update_check: Instant,
+    /// Reabrir o Halo ao fechar (depois de atualizar).
+    relaunch: bool,
 }
 
 #[derive(PartialEq)]
@@ -66,19 +80,30 @@ struct ColorAnim {
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)).unwrap_or_default();
+    pub fn new(cc: &eframe::CreationContext<'_>, mode: Mode) -> Self {
+        let mut settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)).unwrap_or_default();
         let theme: Theme = cc.storage.and_then(|s| eframe::get_value(s, THEME_KEY)).unwrap_or_default();
         let stats: Stats = cc.storage.and_then(|s| eframe::get_value(s, STATS_KEY)).unwrap_or_default();
         let now = Instant::now();
         let long_ago = now.checked_sub(Duration::from_secs(10)).unwrap_or(now);
+        let mut prefs = prefs::State::default();
+        // Primeira abertura depois de atualizar: mostra as novidades.
+        if settings.last_version != update::VERSION {
+            if !settings.last_version.is_empty() && update::newer(update::VERSION, &settings.last_version) {
+                log::info!("Atualizado de {} para {}", settings.last_version, update::VERSION);
+                prefs.open = true;
+                prefs.tab = prefs::Tab::About;
+                prefs.whats_new = true;
+            }
+            settings.last_version = update::VERSION.to_owned();
+        }
         Self {
             timer: Timer::new(&settings),
             color: ColorAnim { phase: Phase::Focus, from: theme.focus, changed_at: long_ago },
             clock: ClockAnim { shown: String::new(), prev: String::new(), changed_at: long_ago },
             settings,
             theme,
-            prefs: prefs::State::default(),
+            prefs,
             font_error: None,
             glass_error: None,
             started: now,
@@ -88,6 +113,81 @@ impl App {
             media: None,
             media_lyrics: false,
             lyric: (None, long_ago),
+            mode,
+            first_frame: true,
+            tray: None,
+            tray_unavailable: false,
+            hidden: false,
+            updater: Updater::new(cc.egui_ctx.clone()),
+            // Primeira verificação alguns segundos depois de abrir, para não atrasar a inicialização.
+            next_update_check: now + Duration::from_secs(5),
+            relaunch: false,
+        }
+    }
+
+    fn set_hidden(&mut self, ctx: &egui::Context, hidden: bool) {
+        self.hidden = hidden;
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Visible(!hidden));
+        if !hidden {
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
+        }
+    }
+
+    fn minimize(&mut self, ctx: &egui::Context) {
+        if self.tray.is_some() && self.settings.minimize_to_tray {
+            self.set_hidden(ctx, true);
+        } else {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        }
+    }
+
+    /// Cria ou remove o ícone da bandeja, atualiza o desenho e trata os cliques nele.
+    fn sync_tray(&mut self, ctx: &egui::Context, now: Instant) {
+        if self.settings.tray && self.tray.is_none() && !self.tray_unavailable {
+            self.tray = Tray::new(ctx);
+            self.tray_unavailable = self.tray.is_none();
+        } else if !self.settings.tray && self.tray.is_some() {
+            self.tray = None;
+            if self.hidden {
+                self.set_hidden(ctx, false);
+            }
+        }
+        let Some(tray) = &mut self.tray else { return };
+
+        let running = self.timer.is_running();
+        let phase = self.timer.phase.label();
+        let time = format_mmss(self.timer.remaining(now));
+        let tooltip = if running { format!("Halo · {phase} · {time}") } else { format!("Halo · {phase} · {time} (pausado)") };
+        let [r, g, b, _] = self.theme.accent(self.timer.phase).to_array();
+        let step = (self.timer.progress(&self.settings, now).clamp(0.0, 1.0) * 48.0).round() as u8;
+        tray.set(tray::View { step, accent: [r, g, b], running, tooltip });
+
+        for ev in tray.events() {
+            match ev {
+                tray::Event::Toggle => self.set_hidden(ctx, !self.hidden),
+                tray::Event::PlayPause => self.timer.toggle(now),
+                tray::Event::Skip => self.timer.skip(&self.settings, now),
+                tray::Event::Preferences => {
+                    self.set_hidden(ctx, false);
+                    self.prefs.open = true;
+                }
+                tray::Event::Quit => ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close),
+            }
+        }
+    }
+
+    fn sync_updates(&mut self, ctx: &egui::Context, now: Instant) {
+        if self.settings.auto_update {
+            if now >= self.next_update_check {
+                self.next_update_check = now + Duration::from_secs(6 * 3600);
+                self.updater.check();
+            }
+            // Com o timer parado nada redesenha a tela; acorda na hora da próxima verificação.
+            ctx.request_repaint_after(self.next_update_check - now);
+        }
+        if matches!(self.updater.state(), update::State::Ready) && !self.relaunch {
+            self.relaunch = true;
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
         }
     }
 
@@ -349,6 +449,18 @@ impl App {
             let panel = Rect::from_min_max(pos2(full.left(), rect.bottom()), full.max);
             self.draw_music(ui, panel, now, hover);
         }
+
+        // Bolinha discreta no canto quando há atualização; clique abre as Preferências → Sobre.
+        if matches!(self.updater.state(), update::State::Available(_)) {
+            let c = pos2(full.right() - radius_f.max(14.0 * s) * 0.55, full.top() + radius_f.max(14.0 * s) * 0.55);
+            p.circle_filled(c, 6.0 * s, accent.gamma_multiply(0.25));
+            p.circle_filled(c, 3.5 * s, accent);
+            let r = ui.interact(Rect::from_center_size(c, Vec2::splat(16.0 * s)), Id::unique("update-dot"), Sense::click());
+            if r.clicked() {
+                self.prefs.open = true;
+                self.prefs.tab = prefs::Tab::About;
+            }
+        }
     }
 
     /// Painel "tocando agora": música, artista e a linha atual da letra.
@@ -442,7 +554,7 @@ impl App {
         };
         match action {
             TrafficAction::Close => ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close),
-            TrafficAction::Minimize => ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true)),
+            TrafficAction::Minimize => self.minimize(ui.ctx()),
             TrafficAction::Zoom => self.prefs.open = !self.prefs.open,
             TrafficAction::None => {}
         }
@@ -529,14 +641,32 @@ fn bar(p: &egui::Painter, rect: Rect, inset_x: f32, inset_bottom: f32, h: f32, p
 }
 
 impl eframe::App for App {
+    /// Roda mesmo com a janela escondida na bandeja: timer, bandeja, música e atualizações.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let now = Instant::now();
+        if let Some(phase) = self.timer.tick(&self.settings, now) {
+            self.on_phase_finished(ctx, now, phase);
+        }
+        self.sync_media(ctx);
+        self.sync_tray(ctx, now);
+        self.sync_updates(ctx, now);
+
+        // Escondida, só precisa acordar para o timer (e para a bandeja acompanhar).
+        if self.hidden && self.timer.is_running() {
+            let left = self.timer.remaining(now);
+            ctx.request_repaint_after(Duration::from_nanos(u64::from(left.subsec_nanos())).max(Duration::from_millis(50)));
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let now = Instant::now();
 
-        if let Some(phase) = self.timer.tick(&self.settings, now) {
-            self.on_phase_finished(&ctx, now, phase);
+        if self.first_frame {
+            self.first_frame = false;
+            render::mark_ok(self.mode);
+            log::info!("Janela aberta com {}", self.mode.name());
         }
-        self.sync_media(&ctx);
         self.sync_window(&ctx, frame);
         self.shortcuts(&ctx, now);
         let time = format_mmss(self.timer.remaining(now));
@@ -569,7 +699,18 @@ impl eframe::App for App {
         eframe::set_value(storage, STATS_KEY, &self.stats);
     }
 
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if self.relaunch {
+            update::relaunch();
+        }
+    }
+
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [0.0; 4] // fundo transparente para os cantos arredondados
+        if self.mode.transparent() {
+            [0.0; 4] // fundo transparente para os cantos arredondados
+        } else {
+            // Janela opaca (modo de compatibilidade): os cantos ficam da cor do fundo.
+            self.theme.background.to_normalized_gamma_f32()
+        }
     }
 }
