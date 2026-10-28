@@ -5,10 +5,14 @@ edition = "2024"
 
 [dependencies]
 eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "persistence", "wayland", "x11"] }
+raw-window-handle = "0.6"
 serde = { version = "1.0.229", features = ["derive"] }
 
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+window-vibrancy = "0.8"
+
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_System_Diagnostics_Debug", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Media_Audio", "Win32_System_Diagnostics_Debug", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 opt-level = "s"

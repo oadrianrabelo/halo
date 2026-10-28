@@ -1,26 +1,35 @@
 //! Aviso sonoro usando o que o sistema já tem, sem incluir biblioteca de áudio.
+//! `file` vazio usa o som padrão do sistema.
 
-pub fn notify() {
+pub fn notify(file: &str) {
+    let file = file.trim();
+
     #[cfg(windows)]
-    unsafe {
-        windows_sys::Win32::System::Diagnostics::Debug::MessageBeep(
-            windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONASTERISK,
-        );
+    {
+        use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_FILENAME, SND_NODEFAULT};
+        use windows_sys::Win32::System::Diagnostics::Debug::MessageBeep;
+        use windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONASTERISK;
+        let played = !file.is_empty() && {
+            let wide: Vec<u16> = file.encode_utf16().chain(std::iter::once(0)).collect();
+            unsafe { PlaySoundW(wide.as_ptr(), std::ptr::null_mut(), SND_FILENAME | SND_ASYNC | SND_NODEFAULT) != 0 }
+        };
+        if !played {
+            unsafe { MessageBeep(MB_ICONASTERISK) };
+        }
     }
 
     #[cfg(target_os = "macos")]
-    spawn("afplay", &["/System/Library/Sounds/Glass.aiff"]);
+    {
+        let file = if file.is_empty() { "/System/Library/Sounds/Glass.aiff" } else { file };
+        spawn("afplay", &[file]);
+    }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
+        const DEFAULT: &str = "/usr/share/sounds/freedesktop/stereo/complete.oga";
+        let file = if file.is_empty() { DEFAULT } else { file };
         // Tenta os players mais comuns; se nenhum existir, fica só o aviso visual.
-        const SOUND: &str = "/usr/share/sounds/freedesktop/stereo/complete.oga";
-        if !spawn("canberra-gtk-play", &["-i", "complete"])
-            && !spawn("paplay", &[SOUND])
-            && !spawn("pw-play", &[SOUND])
-        {
-            spawn("aplay", &["-q", "/usr/share/sounds/alsa/Front_Center.wav"]);
-        }
+        let _ = spawn("paplay", &[file]) || spawn("pw-play", &[file]) || spawn("aplay", &["-q", file]);
     }
 }
 

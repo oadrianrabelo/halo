@@ -31,6 +31,9 @@ pub struct Settings {
     /// Começa a próxima fase automaticamente ao terminar a atual.
     pub auto_start: bool,
     pub sound: bool,
+    /// Arquivo de som personalizado. Vazio usa o som do sistema.
+    pub sound_file: String,
+    pub always_on_top: bool,
 }
 
 impl Default for Settings {
@@ -42,6 +45,8 @@ impl Default for Settings {
             cycles_before_long: 4,
             auto_start: false,
             sound: true,
+            sound_file: String::new(),
+            always_on_top: true,
         }
     }
 }
