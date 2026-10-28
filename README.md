@@ -55,8 +55,8 @@ cargo run --release
 
 No Linux, instale antes: `libxkbcommon-dev libgl1-mesa-dev libwayland-dev libssl-dev pkg-config`.
 
-Para gerar uma release, crie uma tag `v*` (ex.: `git tag v0.3.0 && git push --tags`) e o GitHub Actions
-compila e publica os binários dos três sistemas.
+A cada push na `main`, o GitHub Actions compila os três sistemas e publica (ou atualiza) a release
+com a versão do `Cargo.toml`. Para lançar uma versão nova, basta mudar o `version` lá.
 
 ## Por que não Tauri/Electron?
 
