@@ -167,19 +167,36 @@ pub fn ring(p: &egui::Painter, center: Pos2, radius: f32, width: f32, progress: 
 }
 
 /// Desenha o tempo com cada dígito numa célula de largura fixa, para os números não "dançarem".
-pub fn clock_text(p: &egui::Painter, pos: Pos2, align: Align2, text: &str, font: FontId, color: Color32) {
+/// Com `roll < 1`, os dígitos que mudaram em relação a `prev` deslizam para cima.
+#[allow(clippy::too_many_arguments)]
+pub fn clock_text(p: &egui::Painter, pos: Pos2, align: Align2, text: &str, prev: &str, roll: f32, font: FontId, color: Color32) {
     let (digit_w, colon_w) = p.fonts_mut(|f| {
         let digit = ('0'..='9').map(|c| f.glyph_width(&font, c)).fold(0.0, f32::max);
         (digit, f.glyph_width(&font, ':'))
     });
-    let width: f32 = text.chars().map(|c| if c.is_ascii_digit() { digit_w } else { colon_w }).sum();
+    let cell = |c: char| if c.is_ascii_digit() { digit_w } else { colon_w };
+    let width: f32 = text.chars().map(cell).sum();
     let center = align.anchor_size(pos, vec2(width, font.size)).center();
+    let animating = roll < 1.0 && prev.chars().count() == text.chars().count();
+    let band = Rect::from_center_size(center, vec2(width + 8.0, font.size * 0.92));
+    let clipped = p.with_clip_rect(band.intersect(p.clip_rect()));
+    let shift = font.size * 0.8;
     let mut x = center.x - width / 2.0;
+    let mut old = prev.chars();
     for c in text.chars() {
-        let w = if c.is_ascii_digit() { digit_w } else { colon_w };
+        let w = cell(c);
         // Os dois-pontos sobem um pouco para alinhar com o meio dos números.
         let dy = if c == ':' { -font.size * 0.06 } else { 0.0 };
-        p.text(pos2(x + w / 2.0, center.y + dy), Align2::CENTER_CENTER, c, font.clone(), color);
+        let at = |off: f32| pos2(x + w / 2.0, center.y + dy + off);
+        match old.next() {
+            Some(o) if animating && o != c => {
+                clipped.text(at(-shift * roll), Align2::CENTER_CENTER, o, font.clone(), color.gamma_multiply(1.0 - roll));
+                clipped.text(at(shift * (1.0 - roll)), Align2::CENTER_CENTER, c, font.clone(), color.gamma_multiply(roll));
+            }
+            _ => {
+                p.text(at(0.0), Align2::CENTER_CENTER, c, font.clone(), color);
+            }
+        }
         x += w;
     }
 }
@@ -341,21 +358,32 @@ impl Rows<'_> {
 }
 
 /// Amostra de tema: um mini pomodoro com as cores do preset.
-pub fn theme_swatch(ui: &mut Ui, name: &str, bg: Color32, fg: Color32, accent: Color32, selected: bool, sel_color: Color32) -> Response {
+pub fn theme_swatch(ui: &mut Ui, preset: &crate::theme::Preset, style: crate::theme::Style, selected: bool, sel_color: Color32) -> Response {
+    let [bg, fg, _, accent, ..] = preset.colors.map(crate::theme::hex);
     let size = vec2(76.0, 62.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let p = ui.painter();
     let card = Rect::from_min_size(rect.min, vec2(size.x, 44.0));
-    p.rect_filled(card, CornerRadius::same(9), bg);
-    p.rect_stroke(card, CornerRadius::same(9), Stroke::new(0.5, Color32::from_black_alpha(50)), StrokeKind::Inside);
-    ring(p, card.center(), 13.0, 3.0, 0.65, fg.gamma_multiply(0.15), accent);
+    match style {
+        crate::theme::Style::Classic => {
+            p.rect_filled(card, CornerRadius::same(9), bg);
+            p.rect_stroke(card, CornerRadius::same(9), Stroke::new(0.5, Color32::from_black_alpha(50)), StrokeKind::Inside);
+            ring(p, card.center(), 13.0, 3.0, 0.65, fg.gamma_multiply(0.15), accent);
+        }
+        crate::theme::Style::Fluid => {
+            let [a, b] = preset.glow.map(crate::theme::hex);
+            let dark = 0.299 * bg.r() as f32 + 0.587 * bg.g() as f32 + 0.114 * bg.b() as f32 <= 128.0;
+            crate::fluid::Backdrop { base: bg, glow_a: a, glow_b: b, opacity: 1.0, dark, time: 0.0 }.paint(p, card, 9.0);
+            crate::fluid::glow_ring(p, card.center(), 12.0, 2.5, 0.65, fg.gamma_multiply(0.12), accent);
+        }
+    }
     if selected {
         p.rect_stroke(card.expand(2.5), CornerRadius::same(11), Stroke::new(2.0, sel_color), StrokeKind::Outside);
     } else if resp.hovered() {
         p.rect_stroke(card.expand(2.5), CornerRadius::same(11), Stroke::new(1.0, sel_color.gamma_multiply(0.4)), StrokeKind::Outside);
     }
     let text_color = if selected { ui.visuals().strong_text_color() } else { ui.visuals().text_color() };
-    p.text(pos2(rect.center().x, rect.bottom() - 7.0), Align2::CENTER_CENTER, name, FontId::proportional(11.0), text_color);
+    p.text(pos2(rect.center().x, rect.bottom() - 7.0), Align2::CENTER_CENTER, preset.name, FontId::proportional(11.0), text_color);
     resp
 }
 
@@ -368,4 +396,19 @@ pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
 pub fn contrast_on(c: Color32) -> Color32 {
     let lum = 0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32;
     if lum > 170.0 { Color32::from_rgb(20, 20, 22) } else { Color32::WHITE }
+}
+
+/// Tecla desenhada (para mostrar atalhos).
+pub fn keycap(ui: &mut Ui, text: &str) -> Response {
+    let font = FontId::proportional(11.5);
+    let color = ui.visuals().strong_text_color();
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, color);
+    let size = vec2(galley.size().x + 12.0, 20.0).max(vec2(20.0, 20.0));
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
+    let p = ui.painter();
+    let fill = ui.visuals().widgets.inactive.bg_fill;
+    p.rect_filled(rect.translate(vec2(0.0, 1.0)), CornerRadius::same(5), Color32::from_black_alpha(40));
+    p.rect_filled(rect, CornerRadius::same(5), fill);
+    p.galley(rect.center() - galley.size() / 2.0, galley, color);
+    resp
 }

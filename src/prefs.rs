@@ -1,7 +1,8 @@
 //! Janela de Preferências, no estilo dos Ajustes do macOS.
 
 use crate::app::App;
-use crate::theme::{FontChoice, LayoutKind, PRESETS, Theme};
+use crate::fluid::{self, Backdrop};
+use crate::theme::{DigitWeight, FontChoice, LayoutKind, Style, Theme};
 use crate::timer::{Phase, Settings, Timer};
 use crate::widgets::{self as w, group};
 use crate::{glass, sound};
@@ -41,12 +42,28 @@ pub fn apply_visuals(ctx: &egui::Context, theme: &Theme) {
     let dark = theme.is_dark();
     let mut v = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
     let c = |x: u32| crate::theme::hex(x);
-    let (panel, card, control, text, weak, line) = if dark {
-        (c(0x232325), c(0x2C2C2E), c(0x3A3A3C), c(0xF5F5F7), c(0x98989D), c(0x3D3D40))
-    } else {
-        (c(0xECECEC), c(0xFFFFFF), c(0xE3E3E8), c(0x1D1D1F), c(0x86868B), c(0xDADADF))
+    let (panel, card, control, text, weak, line) = match (theme.style, dark) {
+        (Style::Classic, true) => (c(0x232325), c(0x2C2C2E), c(0x3A3A3C), c(0xF5F5F7), c(0x98989D), c(0x3D3D40)),
+        (Style::Classic, false) => (c(0xECECEC), c(0xFFFFFF), c(0xE3E3E8), c(0x1D1D1F), c(0x86868B), c(0xDADADF)),
+        // No Fluido as superfícies são vidro por cima do gradiente do fundo.
+        (Style::Fluid, true) => (
+            theme.background,
+            Color32::from_white_alpha(10),
+            Color32::from_white_alpha(22),
+            theme.text,
+            theme.secondary,
+            Color32::from_white_alpha(16),
+        ),
+        (Style::Fluid, false) => (
+            theme.background,
+            Color32::from_white_alpha(150),
+            Color32::from_black_alpha(14),
+            theme.text,
+            theme.secondary,
+            Color32::from_black_alpha(14),
+        ),
     };
-    let accent = theme.long_break;
+    let accent = accent(theme);
     v.panel_fill = panel;
     v.window_fill = card;
     v.extreme_bg_color = card;
@@ -80,6 +97,16 @@ pub fn apply_visuals(ctx: &egui::Context, theme: &Theme) {
     });
 }
 
+/// Cor de destaque dos controles das Preferências.
+pub fn accent(theme: &Theme) -> Color32 {
+    match theme.style {
+        Style::Classic => theme.long_break,
+        // No claro as cores do gradiente são pastéis demais para controles.
+        Style::Fluid if theme.is_dark() => theme.glow_a,
+        Style::Fluid => theme.focus,
+    }
+}
+
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let builder = egui::ViewportBuilder::default()
         .with_title("Preferências")
@@ -95,7 +122,22 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         }) {
             app.prefs.open = false;
         }
-        egui::Frame::new().fill(ui.visuals().panel_fill).inner_margin(16.0).show(ui, |ui| {
+        let t = &app.theme;
+        if t.style == Style::Fluid {
+            // Mesmo gradiente da janela principal, parado e mais calmo.
+            let backdrop = Backdrop {
+                base: t.background,
+                glow_a: crate::theme::mix(t.background, t.glow_a, 0.55),
+                glow_b: crate::theme::mix(t.background, t.glow_b, 0.55),
+                opacity: 1.0,
+                dark: t.is_dark(),
+                time: 0.0,
+            };
+            backdrop.paint(ui.painter(), ui.max_rect(), 0.0);
+        } else {
+            ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().panel_fill);
+        }
+        egui::Frame::new().inner_margin(16.0).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             content(app, ui);
         });
@@ -156,7 +198,7 @@ fn timer_tab(app: &mut App, ui: &mut egui::Ui) {
         rows.row("Pausa longa", |ui| w::stepper(ui, &mut s.long_break_min, 1..=120, " min"));
         rows.row("Focos até a pausa longa", |ui| w::stepper(ui, &mut s.cycles_before_long, 1..=12, ""));
     });
-    let accent = app.theme.long_break;
+    let accent = accent(&app.theme);
     group(ui, "COMPORTAMENTO", |rows| {
         rows.row("Iniciar a próxima fase sozinho", |ui| w::switch(ui, &mut s.auto_start, accent));
     });
@@ -172,17 +214,33 @@ fn timer_tab(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn appearance_tab(app: &mut App, ui: &mut egui::Ui) {
-    let accent = app.theme.long_break;
+    let accent = accent(&app.theme);
     let t = &mut app.theme;
+
+    group(ui, "ESTILO VISUAL", |rows| {
+        rows.full(|ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 12.0;
+                let w = (ui.available_width() - 12.0) / 2.0;
+                for (style, name, desc) in [
+                    (Style::Classic, "Clássico", "Sólido e discreto"),
+                    (Style::Fluid, "Fluido", "Gradiente, vidro e brilho"),
+                ] {
+                    if style_card(ui, style, name, desc, t.style == style, accent, w).clicked() && t.style != style {
+                        t.set_style(style);
+                    }
+                }
+            });
+        });
+    });
 
     group(ui, "TEMA", |rows| {
         rows.full(|ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
-                for preset in PRESETS {
-                    let [bg, fg, _, focus, ..] = preset.colors.map(crate::theme::hex);
+                for preset in t.style.presets() {
                     let selected = t.preset == preset.name;
-                    if w::theme_swatch(ui, preset.name, bg, fg, focus, selected, accent).clicked() {
+                    if w::theme_swatch(ui, preset, t.style, selected, accent).clicked() {
                         t.apply_preset(preset);
                     }
                 }
@@ -190,7 +248,7 @@ fn appearance_tab(app: &mut App, ui: &mut egui::Ui) {
         });
     });
 
-    group(ui, "ESTILO", |rows| {
+    group(ui, "FORMA", |rows| {
         rows.row("Layout", |ui| {
             let opts = LayoutKind::ALL.map(|l| (l, l.label()));
             w::segmented(ui, &mut t.layout, &opts, 200.0);
@@ -217,6 +275,10 @@ fn appearance_tab(app: &mut App, ui: &mut egui::Ui) {
         color(rows, Phase::Focus.label(), &mut t.focus);
         color(rows, Phase::ShortBreak.label(), &mut t.short_break);
         color(rows, Phase::LongBreak.label(), &mut t.long_break);
+        if t.style == Style::Fluid {
+            color(rows, "Gradiente 1", &mut t.glow_a);
+            color(rows, "Gradiente 2", &mut t.glow_b);
+        }
         if changed {
             t.preset = "Personalizado".into();
         }
@@ -252,23 +314,74 @@ fn appearance_tab(app: &mut App, ui: &mut egui::Ui) {
                 });
             });
         }
-        rows.row("Números finos", |ui| w::switch(ui, &mut t.thin_digits, accent));
+        rows.row("Peso dos números", |ui| {
+            let opts = [(DigitWeight::Thin, "Fino"), (DigitWeight::Regular, "Normal"), (DigitWeight::Bold, "Forte")];
+            w::segmented(ui, &mut t.digit_weight, &opts, 180.0);
+        });
     });
     if let Some(err) = &app.font_error {
         ui.colored_label(Color32::from_rgb(255, 69, 58), err);
     }
 
-    group(ui, "MOSTRAR", |rows| {
+    group(ui, "DETALHES", |rows| {
         rows.row("Nome da fase", |ui| w::switch(ui, &mut t.show_phase, accent));
         rows.row("Bolinhas do ciclo", |ui| w::switch(ui, &mut t.show_dots, accent));
         rows.row("Progresso", |ui| w::switch(ui, &mut t.show_progress, accent));
         rows.row("Esconder controles enquanto roda", |ui| w::switch(ui, &mut t.controls_on_hover, accent));
-        rows.row("Botões estilo macOS", |ui| w::switch(ui, &mut t.traffic_lights, accent));
+        rows.row("Animações suaves", |ui| w::switch(ui, &mut t.animations, accent));
+        if t.style == Style::Classic {
+            rows.row("Botões estilo macOS", |ui| w::switch(ui, &mut t.traffic_lights, accent));
+        }
     });
+    hint(ui, "Animações suaves fazem os números rolarem e as cores mudarem devagar. Gastam um pouquinho mais de CPU por um instante a cada segundo.");
+}
+
+/// Cartão de escolha do estilo visual, com uma miniatura.
+fn style_card(ui: &mut egui::Ui, style: Style, name: &str, desc: &str, selected: bool, accent: Color32, width: f32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, 112.0), egui::Sense::click());
+    let p = ui.painter();
+    let preview = egui::Rect::from_min_size(rect.min, vec2(width, 70.0));
+    let preset = &style.presets()[0];
+    let [bg, fg, _, focus, ..] = preset.colors.map(crate::theme::hex);
+    match style {
+        Style::Classic => {
+            p.rect_filled(preview, CornerRadius::same(12), bg);
+            w::ring(p, preview.center(), 22.0, 4.0, 0.62, fg.gamma_multiply(0.12), focus);
+        }
+        Style::Fluid => {
+            let [a, b] = preset.glow.map(crate::theme::hex);
+            Backdrop { base: bg, glow_a: a, glow_b: b, opacity: 1.0, dark: true, time: 0.0 }.paint(p, preview, 12.0);
+            fluid::glow_ring(p, preview.center(), 22.0, 3.5, 0.62, fg.gamma_multiply(0.1), focus);
+        }
+    }
+    let stroke = if selected {
+        Stroke::new(2.0, accent)
+    } else if resp.hovered() {
+        Stroke::new(1.0, accent.gamma_multiply(0.5))
+    } else {
+        Stroke::NONE
+    };
+    p.rect_stroke(preview.expand(2.5), CornerRadius::same(14), stroke, egui::StrokeKind::Outside);
+    let v = ui.visuals();
+    p.text(
+        egui::pos2(rect.left() + 2.0, preview.bottom() + 14.0),
+        egui::Align2::LEFT_CENTER,
+        name,
+        egui::FontId::proportional(13.5),
+        v.strong_text_color(),
+    );
+    p.text(
+        egui::pos2(rect.left() + 2.0, preview.bottom() + 32.0),
+        egui::Align2::LEFT_CENTER,
+        desc,
+        egui::FontId::proportional(11.5),
+        v.weak_text_color(),
+    );
+    resp
 }
 
 fn window_tab(app: &mut App, ui: &mut egui::Ui) {
-    let accent = app.theme.long_break;
+    let accent = accent(&app.theme);
     group(ui, "JANELA", |rows| {
         rows.row("Sempre no topo", |ui| w::switch(ui, &mut app.settings.always_on_top, accent));
         rows.row("Efeito vidro", |ui| {
@@ -291,21 +404,26 @@ fn window_tab(app: &mut App, ui: &mut egui::Ui) {
     let cmd = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" };
     group(ui, "ATALHOS", |rows| {
         for (action, keys) in [
-            ("Iniciar / pausar", "Espaço ou clique".to_owned()),
-            ("Reiniciar fase", "R".to_owned()),
-            ("Pular fase", "S".to_owned()),
-            ("Preferências", format!("{cmd} + ,  ou botão direito")),
-            ("Fechar Preferências", "Esc".to_owned()),
-            ("Sair", format!("{cmd} + Q")),
+            ("Iniciar / pausar", vec!["Espaço"]),
+            ("Reiniciar fase", vec!["R"]),
+            ("Pular fase", vec!["S"]),
+            ("Preferências", vec![cmd, ","]),
+            ("Fechar Preferências", vec!["Esc"]),
+            ("Sair", vec![cmd, "Q"]),
         ] {
-            rows.row(action, |ui| ui.label(RichText::new(keys).color(ui.visuals().weak_text_color())));
+            rows.row(action, |ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                for k in keys.iter().rev() {
+                    w::keycap(ui, k);
+                }
+            });
         }
     });
-    hint(ui, "Com os botões estilo macOS: vermelho fecha, amarelo minimiza e verde abre as Preferências.");
+    hint(ui, "Clique no timer para iniciar ou pausar, arraste para mover e use o botão direito para abrir as Preferências. Os botões que aparecem ao passar o mouse fecham, minimizam e abrem as Preferências.");
 }
 
 fn sound_tab(app: &mut App, ui: &mut egui::Ui) {
-    let accent = app.theme.long_break;
+    let accent = accent(&app.theme);
     let s = &mut app.settings;
     group(ui, "AVISO", |rows| {
         rows.row("Tocar som ao terminar", |ui| w::switch(ui, &mut s.sound, accent));
