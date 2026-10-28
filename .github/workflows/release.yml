@@ -18,20 +18,20 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            bin: pomodoro.exe
-            asset: pomodoro-windows-x64.exe
+            bin: halo.exe
+            asset: halo-windows-x64.exe
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            bin: pomodoro
-            asset: pomodoro-linux-x64
+            bin: halo
+            asset: halo-linux-x64
           - os: macos-latest
             target: aarch64-apple-darwin
-            bin: pomodoro
-            asset: pomodoro-macos-arm64
+            bin: halo
+            asset: halo-macos-arm64
           - os: macos-latest
             target: x86_64-apple-darwin
-            bin: pomodoro
-            asset: pomodoro-macos-intel
+            bin: halo
+            asset: halo-macos-intel
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +41,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Dependências do Linux
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libgl1-mesa-dev libwayland-dev
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libgl1-mesa-dev libwayland-dev libssl-dev pkg-config
       - run: cargo test --release --target ${{ matrix.target }}
       - run: cargo build --release --target ${{ matrix.target }}
       - name: Renomeia binário

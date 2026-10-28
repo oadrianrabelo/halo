@@ -1,4 +1,4 @@
-//! Lógica pura do pomodoro, sem nada de UI. Fácil de testar e reaproveitar.
+//! Lógica pura do pomodoro (técnica de foco), sem nada de UI. Fácil de testar e reaproveitar.
 
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
@@ -34,6 +34,15 @@ pub struct Settings {
     /// Arquivo de som personalizado. Vazio usa o som do sistema.
     pub sound_file: String,
     pub always_on_top: bool,
+    /// Mostra a música tocando no sistema.
+    pub music: bool,
+    /// Esconde o painel de música quando nada está tocando.
+    pub music_only_when_playing: bool,
+    pub lyrics: bool,
+    /// Adianta (+) ou atrasa (−) a letra, em segundos.
+    pub lyrics_offset: f32,
+    /// Meta de focos por dia (Histórico).
+    pub daily_goal: u32,
 }
 
 impl Default for Settings {
@@ -47,6 +56,11 @@ impl Default for Settings {
             sound: true,
             sound_file: String::new(),
             always_on_top: true,
+            music: true,
+            music_only_when_playing: true,
+            lyrics: true,
+            lyrics_offset: 0.0,
+            daily_goal: 8,
         }
     }
 }

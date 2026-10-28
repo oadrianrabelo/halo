@@ -12,6 +12,7 @@ pub enum Icon {
     Pause,
     Reset,
     Skip,
+    Previous,
     Settings,
 }
 
@@ -33,6 +34,11 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, color: Color32) {
             let pts = vec![r.left_top(), r.left_bottom(), pos2(r.left() + w * 0.72, c.y)];
             p.add(Shape::convex_polygon(pts, color, Stroke::NONE));
             p.rect_filled(Rect::from_min_max(pos2(r.right() - w * 0.18, r.top()), r.right_bottom()), w * 0.06, color);
+        }
+        Icon::Previous => {
+            let pts = vec![r.right_top(), r.right_bottom(), pos2(r.right() - w * 0.72, c.y)];
+            p.add(Shape::convex_polygon(pts, color, Stroke::NONE));
+            p.rect_filled(Rect::from_min_max(r.left_top(), pos2(r.left() + w * 0.18, r.bottom())), w * 0.06, color);
         }
         Icon::Reset => {
             let rad = w * 0.44;

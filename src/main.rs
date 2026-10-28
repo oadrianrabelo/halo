@@ -5,8 +5,11 @@ mod app;
 mod fluid;
 mod fonts;
 mod glass;
+mod lyrics;
+mod media;
 mod prefs;
 mod sound;
+mod stats;
 mod theme;
 mod timer;
 mod widgets;
@@ -16,7 +19,7 @@ use eframe::egui;
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Pomodoro")
+            .with_title("Halo")
             .with_inner_size(theme::LayoutKind::Ring.base_size())
             .with_resizable(false)
             .with_decorations(false)
@@ -25,5 +28,5 @@ fn main() -> eframe::Result {
             .with_taskbar(true),
         ..Default::default()
     };
-    eframe::run_native("Pomodoro", options, Box::new(|cc| Ok(Box::new(app::App::new(cc)))))
+    eframe::run_native("Halo", options, Box::new(|cc| Ok(Box::new(app::App::new(cc)))))
 }

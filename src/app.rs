@@ -2,6 +2,8 @@ use crate::fluid::{self, Backdrop};
 use crate::theme::{DigitWeight, FontChoice, LayoutKind, Style, Theme};
 use crate::timer::{Phase, Settings, Timer, format_mmss};
 use crate::widgets::{self as w, Icon, TrafficAction};
+use crate::media::{self, LyricsState, Media};
+use crate::stats::{self, Stats};
 use crate::{fonts, glass, prefs, sound};
 use eframe::egui::{
     self, Align2, Color32, CornerRadius, FontId, Id, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2, emath::easing, pos2,
@@ -11,6 +13,9 @@ use std::time::{Duration, Instant};
 
 const SETTINGS_KEY: &str = "settings";
 const THEME_KEY: &str = "theme";
+const STATS_KEY: &str = "stats";
+/// Altura do painel de música, em escala 1.
+const MUSIC_PANEL: f32 = 72.0;
 /// Duração da rolagem dos números e da troca de cor entre fases.
 const ROLL: f32 = 0.32;
 const PHASE_FADE: f32 = 0.7;
@@ -29,6 +34,12 @@ pub struct App {
     applied: Option<Applied>,
     clock: ClockAnim,
     color: ColorAnim,
+    pub stats: Stats,
+    /// Thread de música (só existe com a função ligada).
+    pub media: Option<Media>,
+    media_lyrics: bool,
+    /// Linha da letra atual e quando ela mudou (para animar).
+    lyric: (Option<usize>, Instant),
 }
 
 #[derive(PartialEq)]
@@ -58,6 +69,7 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)).unwrap_or_default();
         let theme: Theme = cc.storage.and_then(|s| eframe::get_value(s, THEME_KEY)).unwrap_or_default();
+        let stats: Stats = cc.storage.and_then(|s| eframe::get_value(s, STATS_KEY)).unwrap_or_default();
         let now = Instant::now();
         let long_ago = now.checked_sub(Duration::from_secs(10)).unwrap_or(now);
         Self {
@@ -72,15 +84,43 @@ impl App {
             started: now,
             flash_until: None,
             applied: None,
+            stats,
+            media: None,
+            media_lyrics: false,
+            lyric: (None, long_ago),
         }
     }
 
-    fn on_phase_finished(&mut self, ctx: &egui::Context, now: Instant) {
+    fn on_phase_finished(&mut self, ctx: &egui::Context, now: Instant, phase: Phase) {
+        if phase == Phase::Focus {
+            self.stats.record(stats::today(), self.settings.focus_min);
+        }
         if self.settings.sound {
             sound::notify(&self.settings.sound_file);
         }
         self.flash_until = Some(now + Duration::from_secs(3));
         ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
+    }
+
+    /// Liga, desliga ou reinicia a thread de música conforme as configurações.
+    fn sync_media(&mut self, ctx: &egui::Context) {
+        let want = self.settings.music;
+        if !want {
+            self.media = None;
+        } else if self.media.is_none() || self.media_lyrics != self.settings.lyrics {
+            self.media = Some(Media::start(ctx.clone(), self.settings.lyrics));
+            self.media_lyrics = self.settings.lyrics;
+        }
+    }
+
+    fn show_music_panel(&self) -> bool {
+        let Some(m) = &self.media else { return false };
+        !self.settings.music_only_when_playing || m.snapshot().0.is_some()
+    }
+
+    fn window_size(&self) -> Vec2 {
+        let extra = if self.show_music_panel() { MUSIC_PANEL * self.theme.scale } else { 0.0 };
+        self.theme.window_size() + vec2(0.0, extra)
     }
 
     fn corner_radius(&self) -> f32 {
@@ -93,7 +133,7 @@ impl App {
         let t = &self.theme;
         let next = Applied {
             font: (t.font.clone(), t.digit_weight),
-            size: t.window_size(),
+            size: self.window_size(),
             on_top: self.settings.always_on_top,
             glass: (t.glass, self.corner_radius().round() as u32, t.is_dark()),
             visuals: (t.style, t.is_dark(), t.long_break, t.background),
@@ -175,7 +215,9 @@ impl App {
 
     fn draw(&mut self, ui: &mut egui::Ui, now: Instant) {
         let ctx = ui.ctx().clone();
-        let rect = ui.max_rect();
+        let full = ui.max_rect();
+        // Área do timer; o que sobrar embaixo é o painel de música.
+        let rect = Rect::from_min_size(full.min, self.theme.window_size().min(full.size()));
         let t = self.theme.clone();
         let s = t.scale;
         let fluid = t.style == Style::Fluid;
@@ -183,7 +225,7 @@ impl App {
         let accent = self.shown_accent(now, t.accent(self.timer.phase));
         let running = self.timer.is_running();
 
-        let hovered = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| rect.contains(p));
+        let hovered = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| full.contains(p));
         let hover = ctx.animate_bool_with_time(Id::unique("hover"), hovered, 0.18);
         let show_controls = !t.controls_on_hover || !running || hovered;
         let controls = if fluid {
@@ -193,10 +235,10 @@ impl App {
         };
 
         // Fundo: clique inicia/pausa, arrastar move, botão direito abre as Preferências.
-        let bg = ui.interact(rect, Id::unique("background"), Sense::click_and_drag());
+        let bg = ui.interact(full, Id::unique("background"), Sense::click_and_drag());
         if bg.drag_started() {
             ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-        } else if bg.clicked() {
+        } else if bg.clicked() && bg.interact_pointer_pos().is_some_and(|p| rect.contains(p)) {
             self.timer.toggle(now);
         }
         if ctx.input(|i| i.pointer.secondary_clicked()) {
@@ -216,16 +258,16 @@ impl App {
                 dark,
                 time: (now - self.started).as_secs_f32(),
             };
-            backdrop.paint(&p, rect, radius_f);
+            backdrop.paint(&p, full, radius_f);
         } else {
             let [r, g, b, _] = t.background.to_array();
-            p.rect_filled(rect, radius, Color32::from_rgba_unmultiplied(r, g, b, (t.opacity * 255.0) as u8));
-            p.rect_stroke(rect.shrink(0.5), radius, Stroke::new(1.0, t.text.gamma_multiply(0.08)), StrokeKind::Inside);
+            p.rect_filled(full, radius, Color32::from_rgba_unmultiplied(r, g, b, (t.opacity * 255.0) as u8));
+            p.rect_stroke(full.shrink(0.5), radius, Stroke::new(1.0, t.text.gamma_multiply(0.08)), StrokeKind::Inside);
         }
         if let Some(until) = self.flash_until.filter(|u| now < *u) {
             let phase = (until - now).as_secs_f32() * std::f32::consts::TAU / 1.2;
             let a = 0.35 + 0.35 * phase.sin();
-            p.rect_stroke(rect.shrink(1.5 * s), radius, Stroke::new(3.0 * s, accent.gamma_multiply(a)), StrokeKind::Inside);
+            p.rect_stroke(full.shrink(1.5 * s), radius, Stroke::new(3.0 * s, accent.gamma_multiply(a)), StrokeKind::Inside);
         }
 
         let progress = self.timer.progress(&self.settings, now);
@@ -303,6 +345,93 @@ impl App {
                 self.controls(ui, c + vec2(-12.0 * s, 0.0), 28.0 * s, 24.0 * s, hover, true);
             }
         }
+        if full.height() > rect.height() + 1.0 {
+            let panel = Rect::from_min_max(pos2(full.left(), rect.bottom()), full.max);
+            self.draw_music(ui, panel, now, hover);
+        }
+    }
+
+    /// Painel "tocando agora": música, artista e a linha atual da letra.
+    fn draw_music(&mut self, ui: &mut egui::Ui, panel: Rect, now: Instant, hover: f32) {
+        let Some(media) = &self.media else { return };
+        let (playback, lyrics) = media.snapshot();
+        let t = &self.theme;
+        let s = t.scale;
+        let p = ui.painter().clone();
+        let inner = panel.shrink2(vec2(16.0 * s, 0.0));
+        p.line_segment(
+            [pos2(inner.left(), panel.top()), pos2(inner.right(), panel.top())],
+            Stroke::new(1.0, t.text.gamma_multiply(0.08)),
+        );
+
+        let Some(pb) = playback else {
+            p.text(panel.center(), Align2::CENTER_CENTER, "Nada tocando", FontId::proportional(11.0 * s), t.secondary);
+            return;
+        };
+
+        // Linha de cima: música · artista, e os controles ao passar o mouse.
+        let row1 = inner.top() + 15.0 * s;
+        let controls_w = if hover > 0.01 { 66.0 * s } else { 0.0 };
+        let synced = matches!(lyrics, LyricsState::Found(_));
+        let head = if synced || pb.track.artist.is_empty() {
+            format!("{} · {}", pb.track.title, pb.track.artist).trim_end_matches(" · ").to_owned()
+        } else {
+            pb.track.artist.clone()
+        };
+        let head_job = one_line(&head, FontId::proportional(10.5 * s), t.secondary, inner.width() - controls_w);
+        p.galley(pos2(inner.left(), row1 - 7.0 * s), p.layout_job(head_job), t.secondary);
+        if hover > 0.01 {
+            let icon = 13.0 * s;
+            let mut x = inner.right() - icon / 2.0;
+            let play = if pb.playing { Icon::Pause } else { Icon::Play };
+            for (id, icon_kind, cmd) in [
+                ("m-next", Icon::Skip, media::Command::Next),
+                ("m-play", play, media::Command::PlayPause),
+                ("m-prev", Icon::Previous, media::Command::Previous),
+            ] {
+                let r = Rect::from_center_size(pos2(x, row1), Vec2::splat(icon));
+                if w::icon_button(ui, r, id, icon_kind, t.text, hover).clicked() {
+                    media.send(cmd);
+                }
+                x -= icon + 9.0 * s;
+            }
+        }
+
+        // Embaixo: a linha atual da letra (ou o nome da música, se não houver letra).
+        let body = Rect::from_min_max(pos2(inner.left(), row1 + 9.0 * s), pos2(inner.right(), panel.bottom() - 6.0 * s));
+        let font = FontId::proportional(13.0 * s);
+        let (text, idx) = match &lyrics {
+            LyricsState::Found(l) => {
+                let pos = pb.position_now(now) + self.settings.lyrics_offset;
+                let idx = l.line_at(pos);
+                let line = idx.map(|i| l.lines[i].1.trim()).filter(|x| !x.is_empty()).unwrap_or("♪");
+                (line.to_owned(), idx)
+            }
+            LyricsState::Loading if self.settings.lyrics => (pb.track.title.clone(), None),
+            _ => (pb.track.title.clone(), None),
+        };
+        if self.lyric.0 != idx {
+            self.lyric = (idx, now);
+        }
+        let k = if t.animations { easing::cubic_out(((now - self.lyric.1).as_secs_f32() / 0.35).min(1.0)) } else { 1.0 };
+        let job = wrapped(&text, font, t.text.gamma_multiply(k), body.width(), 2);
+        let galley = p.layout_job(job);
+        let y = body.top() + 6.0 * s * (1.0 - k);
+        p.galley(pos2(body.left(), y), galley, t.text);
+    }
+
+    /// Quanto falta para a próxima linha da letra (para redesenhar só nessa hora).
+    fn next_lyric_change(&self, now: Instant) -> Option<Duration> {
+        let (pb, lyrics) = self.media.as_ref()?.snapshot();
+        let pb = pb.filter(|p| p.playing)?;
+        let LyricsState::Found(l) = lyrics else { return None };
+        let pos = pb.position_now(now) + self.settings.lyrics_offset;
+        let since = (now - self.lyric.1).as_secs_f32();
+        if self.theme.animations && since < 0.35 {
+            return Some(Duration::from_millis(16));
+        }
+        let next = l.next_change(pos)?;
+        Some(Duration::from_secs_f32((next - pos).clamp(0.0, 5.0)))
     }
 
     fn window_buttons(&mut self, ui: &mut egui::Ui, left_center: Pos2, d: f32, alpha: f32) {
@@ -366,6 +495,18 @@ impl App {
     }
 }
 
+/// Texto em uma linha só, com reticências se não couber.
+fn one_line(text: &str, font: FontId, color: Color32, width: f32) -> egui::text::LayoutJob {
+    wrapped(text, font, color, width, 1)
+}
+
+fn wrapped(text: &str, font: FontId, color: Color32, width: f32, rows: usize) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::simple(text.to_owned(), font, color, width.max(10.0));
+    job.wrap.max_rows = rows;
+    job.wrap.overflow_character = Some('…');
+    job
+}
+
 /// Barra de progresso fina no rodapé.
 #[allow(clippy::too_many_arguments)]
 fn bar(p: &egui::Painter, rect: Rect, inset_x: f32, inset_bottom: f32, h: f32, progress: f32, track: Color32, color: Color32, glow: bool) {
@@ -392,9 +533,10 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         let now = Instant::now();
 
-        if self.timer.tick(&self.settings, now).is_some() {
-            self.on_phase_finished(&ctx, now);
+        if let Some(phase) = self.timer.tick(&self.settings, now) {
+            self.on_phase_finished(&ctx, now, phase);
         }
+        self.sync_media(&ctx);
         self.sync_window(&ctx, frame);
         self.shortcuts(&ctx, now);
         let time = format_mmss(self.timer.remaining(now));
@@ -411,6 +553,9 @@ impl eframe::App for App {
             ctx.request_repaint_after(Duration::from_millis(16));
         } else if self.flash_until.take().is_some() {
             ctx.request_repaint();
+        } else if let Some(wait) = self.next_lyric_change(now) {
+            let timer_wait = self.timer.is_running().then(|| Duration::from_nanos(u64::from(self.timer.remaining(now).subsec_nanos())));
+            ctx.request_repaint_after(timer_wait.map_or(wait, |t| t.min(wait)).max(Duration::from_millis(50)));
         } else if self.timer.is_running() {
             let left = self.timer.remaining(now);
             let to_next_second = Duration::from_nanos(u64::from(left.subsec_nanos()));
@@ -421,6 +566,7 @@ impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, SETTINGS_KEY, &self.settings);
         eframe::set_value(storage, THEME_KEY, &self.theme);
+        eframe::set_value(storage, STATS_KEY, &self.stats);
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {

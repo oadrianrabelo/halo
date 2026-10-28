@@ -15,6 +15,8 @@ pub enum Tab {
     Appearance,
     Window,
     Sound,
+    Music,
+    History,
 }
 
 pub struct State {
@@ -110,7 +112,7 @@ pub fn accent(theme: &Theme) -> Color32 {
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let builder = egui::ViewportBuilder::default()
         .with_title("Preferências")
-        .with_inner_size([420.0, 580.0])
+        .with_inner_size([480.0, 600.0])
         .with_min_inner_size([380.0, 420.0])
         .with_always_on_top();
     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("prefs"), builder, |ui, _class| {
@@ -149,7 +151,14 @@ fn content(app: &mut App, ui: &mut egui::Ui) {
     w::segmented(
         ui,
         &mut app.prefs.tab,
-        &[(Tab::Timer, "Timer"), (Tab::Appearance, "Aparência"), (Tab::Window, "Janela"), (Tab::Sound, "Som")],
+        &[
+            (Tab::Timer, "Timer"),
+            (Tab::Appearance, "Aparência"),
+            (Tab::Window, "Janela"),
+            (Tab::Sound, "Som"),
+            (Tab::Music, "Música"),
+            (Tab::History, "Histórico"),
+        ],
         width,
     );
     ui.add_space(8.0);
@@ -163,6 +172,8 @@ fn content(app: &mut App, ui: &mut egui::Ui) {
             Tab::Appearance => appearance_tab(app, ui),
             Tab::Window => window_tab(app, ui),
             Tab::Sound => sound_tab(app, ui),
+            Tab::Music => music_tab(app, ui),
+            Tab::History => history_tab(app, ui),
         });
 
     ui.add_space(8.0);
@@ -173,7 +184,10 @@ fn content(app: &mut App, ui: &mut egui::Ui) {
                     app.theme = Theme::default();
                     app.settings.always_on_top = true;
                 }
-                Tab::Timer | Tab::Sound => {
+                Tab::History => {
+                    app.settings.daily_goal = Settings::default().daily_goal;
+                }
+                Tab::Timer | Tab::Sound | Tab::Music => {
                     let keep_on_top = app.settings.always_on_top;
                     app.settings = Settings { always_on_top: keep_on_top, ..Settings::default() };
                     app.timer = Timer::new(&app.settings);
@@ -181,7 +195,7 @@ fn content(app: &mut App, ui: &mut egui::Ui) {
             }
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let quit = RichText::new("Sair do Pomodoro").color(Color32::from_rgb(255, 69, 58));
+            let quit = RichText::new("Sair do Halo").color(Color32::from_rgb(255, 69, 58));
             if ui.button(quit).clicked() {
                 ui.ctx().send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
             }
@@ -442,6 +456,168 @@ fn sound_tab(app: &mut App, ui: &mut egui::Ui) {
         });
     });
     hint(ui, "A janela também pisca e pede atenção na barra de tarefas quando uma fase termina.");
+}
+
+fn music_tab(app: &mut App, ui: &mut egui::Ui) {
+    let accent = accent(&app.theme);
+    let s = &mut app.settings;
+    group(ui, "TOCANDO AGORA", |rows| {
+        rows.row("Mostrar a música tocando", |ui| w::switch(ui, &mut s.music, accent));
+        rows.row("Só aparecer quando houver música", |ui| w::switch(ui, &mut s.music_only_when_playing, accent));
+    });
+    group(ui, "LETRAS", |rows| {
+        rows.row("Letra sincronizada", |ui| w::switch(ui, &mut s.lyrics, accent));
+        rows.row("Ajuste de tempo", |ui| {
+            ui.add(egui::Slider::new(&mut s.lyrics_offset, -3.0..=3.0).step_by(0.1).show_value(false));
+            ui.label(format!("{:+.1} s", s.lyrics_offset));
+        });
+    });
+
+    // O que está sendo detectado agora, para a pessoa saber se está funcionando.
+    let status = match app.media.as_ref().map(|m| m.snapshot()) {
+        None => "Desligado.".to_owned(),
+        Some((None, _)) => "Nada tocando agora.".to_owned(),
+        Some((Some(pb), lyrics)) => {
+            let letra = match lyrics {
+                crate::media::LyricsState::Found(_) => "letra encontrada",
+                crate::media::LyricsState::Loading => "buscando letra…",
+                crate::media::LyricsState::NotFound => "sem letra sincronizada",
+                crate::media::LyricsState::None => "letras desligadas",
+            };
+            format!("{} — {} ({letra})", pb.track.title, pb.track.artist)
+        }
+    };
+    group(ui, "AGORA", |rows| {
+        rows.full(|ui| ui.label(status));
+    });
+
+    let how = if cfg!(windows) {
+        "Funciona com qualquer app que aparece nos controles de mídia do Windows: Spotify, navegador (YouTube Music, etc.), Música…"
+    } else if cfg!(target_os = "macos") {
+        "Funciona com Spotify e Música. Na primeira vez o macOS pede permissão para o Halo controlar o app."
+    } else {
+        "Funciona com qualquer player compatível com MPRIS: Spotify, navegadores, VLC, Rhythmbox, Elisa…"
+    };
+    hint(ui, how);
+    hint(ui, "Letras de lrclib.net. Se a letra estiver adiantada ou atrasada, use o ajuste de tempo.");
+}
+
+fn history_tab(app: &mut App, ui: &mut egui::Ui) {
+    use crate::stats::today;
+    use chrono::{Datelike, Days};
+    let accent = app.theme.accent(Phase::Focus);
+    let today = today();
+    let stats = &app.stats;
+    let day = stats.day(today);
+    let total = stats.total();
+    let goal = app.settings.daily_goal.max(1);
+
+    // Cartões de resumo.
+    ui.add_space(4.0);
+    ui.columns(3, |cols| {
+        summary(&mut cols[0], "Hoje", &format!("{}", day.sessions), &format!("{} min de foco", day.minutes));
+        let streak = stats.streak(today);
+        summary(&mut cols[1], "Sequência", &format!("{streak}"), if streak == 1 { "dia" } else { "dias" });
+        summary(&mut cols[2], "Total", &format!("{}", total.sessions), &format!("{:.1} h", total.minutes as f32 / 60.0));
+    });
+
+    group(ui, "META DIÁRIA", |rows| {
+        rows.row("Focos por dia", |ui| w::stepper(ui, &mut app.settings.daily_goal, 1..=24, ""));
+        rows.full(|ui| {
+            let frac = day.sessions as f32 / goal as f32;
+            let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 8.0), egui::Sense::hover());
+            let p = ui.painter();
+            p.rect_filled(rect, CornerRadius::same(4), ui.visuals().widgets.inactive.bg_fill);
+            let mut done = rect;
+            done.set_width(rect.width() * frac.min(1.0));
+            if frac > 0.0 {
+                p.rect_filled(done, CornerRadius::same(4), accent);
+            }
+            ui.add_space(4.0);
+            let msg = if day.sessions >= goal {
+                "Meta de hoje batida!".to_owned()
+            } else {
+                format!("{} de {goal} focos hoje", day.sessions)
+            };
+            ui.label(RichText::new(msg).size(11.5).color(ui.visuals().weak_text_color()));
+        });
+    });
+
+    group(ui, "ÚLTIMOS 7 DIAS", |rows| {
+        rows.full(|ui| {
+            const NAMES: [&str; 7] = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"];
+            let days: Vec<_> = (0..7).rev().map(|i| today - Days::new(i)).collect();
+            let max = days.iter().map(|d| stats.day(*d).minutes).max().unwrap_or(0).max(1);
+            let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 110.0), egui::Sense::hover());
+            let p = ui.painter();
+            let slot = rect.width() / 7.0;
+            let weak = ui.visuals().weak_text_color();
+            for (i, d) in days.iter().enumerate() {
+                let m = stats.day(*d).minutes;
+                let x = rect.left() + slot * (i as f32 + 0.5);
+                let h = 70.0 * m as f32 / max as f32;
+                let base = rect.bottom() - 20.0;
+                let bar = egui::Rect::from_min_max(egui::pos2(x - slot * 0.22, base - h.max(3.0)), egui::pos2(x + slot * 0.22, base));
+                let color = if *d == today { accent } else { accent.gamma_multiply(0.45) };
+                p.rect_filled(bar, CornerRadius::same(4), if m == 0 { weak.gamma_multiply(0.25) } else { color });
+                if m > 0 {
+                    p.text(egui::pos2(x, bar.top() - 8.0), egui::Align2::CENTER_CENTER, format!("{m}"), egui::FontId::proportional(10.0), weak);
+                }
+                let name = NAMES[d.weekday().num_days_from_monday() as usize];
+                p.text(egui::pos2(x, rect.bottom() - 8.0), egui::Align2::CENTER_CENTER, name, egui::FontId::proportional(11.0), weak);
+            }
+        });
+    });
+
+    group(ui, "ÚLTIMAS 16 SEMANAS", |rows| {
+        rows.full(|ui| {
+            // Grade estilo "contribuições": colunas = semanas, linhas = dias (seg a dom).
+            let weeks = 16;
+            let cell = ((ui.available_width() - 2.0 * (weeks as f32 - 1.0)) / weeks as f32).min(16.0);
+            let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 7.0 * (cell + 2.0)), egui::Sense::hover());
+            let p = ui.painter();
+            let start = today - Days::new(u64::from(today.weekday().num_days_from_monday()) + 7 * (weeks - 1));
+            let max = stats.days.values().map(|d| d.sessions).max().unwrap_or(1).max(1);
+            let empty = ui.visuals().widgets.inactive.bg_fill;
+            for wk in 0..weeks {
+                for dow in 0..7 {
+                    let d = start + Days::new(wk * 7 + dow);
+                    if d > today {
+                        continue;
+                    }
+                    let n = stats.day(d).sessions;
+                    let c = if n == 0 { empty } else { accent.gamma_multiply(0.3 + 0.7 * n as f32 / max as f32) };
+                    let min = rect.min + vec2(wk as f32 * (cell + 2.0), dow as f32 * (cell + 2.0));
+                    p.rect_filled(egui::Rect::from_min_size(min, egui::Vec2::splat(cell)), CornerRadius::same(3), c);
+                }
+            }
+        });
+    });
+
+    ui.add_space(6.0);
+    let confirm = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("confirm-clear")).unwrap_or(false));
+    let label = if confirm { "Clique de novo para apagar tudo" } else { "Apagar histórico" };
+    if ui.button(RichText::new(label).color(Color32::from_rgb(255, 69, 58))).clicked() {
+        if confirm {
+            app.stats = Default::default();
+        }
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("confirm-clear"), !confirm));
+    }
+}
+
+/// Cartão com um número grande.
+fn summary(ui: &mut egui::Ui, title: &str, value: &str, sub: &str) {
+    egui::Frame::new()
+        .fill(ui.visuals().extreme_bg_color)
+        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(title).size(11.0).color(ui.visuals().weak_text_color()));
+            ui.label(RichText::new(value).size(26.0).strong());
+            ui.label(RichText::new(sub).size(11.0).color(ui.visuals().weak_text_color()));
+        });
 }
 
 fn hint(ui: &mut egui::Ui, text: &str) {
