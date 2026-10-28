@@ -5,7 +5,7 @@ Um pomodoro flutuante, bonito e minúsculo para Windows, Linux e macOS, com a m�
 ![Estilo Clássico](docs/classico.png)
 ![Estilo Fluido](docs/fluido.png)
 
-- **Leve de verdade:** um único executável de ~6 MB, sem navegador nem WebView por baixo.
+- **Leve de verdade:** um único executável de ~7 MB, sem navegador nem WebView por baixo.
   Com o timer parado, não gasta CPU. Rodando, redesenha uma vez por segundo.
 - **Flutuante:** fica por cima das outras janelas, sem borda. Arraste por qualquer lugar.
 - **Dois estilos visuais**
