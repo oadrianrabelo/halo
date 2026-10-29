@@ -453,25 +453,46 @@ fn window_tab(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn sound_tab(app: &mut App, ui: &mut egui::Ui) {
+    use sound::Sound;
     let accent = accent(&app.theme);
     let s = &mut app.settings;
     group(ui, "AVISO", |rows| {
         rows.row("Tocar som ao terminar", |ui| w::switch(ui, &mut s.sound, accent));
-        rows.full(|ui| {
-            ui.label("Arquivo de som");
-            ui.horizontal(|ui| {
-                let hint_text = if cfg!(windows) { "Padrão do sistema (.wav)" } else { "Padrão do sistema" };
-                let edit = egui::TextEdit::singleline(&mut s.sound_file)
-                    .hint_text(hint_text)
-                    .desired_width(ui.available_width() - 70.0);
-                ui.add(edit);
-                if ui.button("Testar").clicked() {
-                    sound::notify(&s.sound_file);
+        rows.row("Volume", |ui| {
+            ui.add(egui::Slider::new(&mut s.sound_volume, 0.05..=1.0).show_value(false));
+            ui.label(format!("{:.0}%", s.sound_volume * 100.0));
+        });
+    });
+
+    let (volume, file) = (s.sound_volume, s.sound_file.clone());
+    let pick = |rows: &mut w::Rows<'_>, label: &str, id: &str, value: &mut Sound| {
+        rows.row(label, |ui| {
+            if ui.button("Ouvir").clicked() {
+                sound::play(*value, volume, &file);
+            }
+            egui::ComboBox::from_id_salt(id).selected_text(value.label()).width(150.0).show_ui(ui, |ui| {
+                for option in Sound::ALL {
+                    if ui.selectable_value(value, option, option.label()).clicked() {
+                        sound::play(option, volume, &file);
+                    }
                 }
             });
         });
+    };
+    group(ui, "SONS", |rows| {
+        pick(rows, "Fim do foco", "som-foco", &mut s.sound_focus_end);
+        pick(rows, "Fim da pausa", "som-pausa", &mut s.sound_break_end);
     });
-    hint(ui, "A janela também pisca e pede atenção na barra de tarefas quando uma fase termina.");
+
+    if s.sound_focus_end == Sound::Arquivo || s.sound_break_end == Sound::Arquivo {
+        group(ui, "ARQUIVO", |rows| {
+            rows.full(|ui| {
+                let hint_text = if cfg!(windows) { "Caminho de um .wav" } else { "Caminho de um arquivo de som" };
+                ui.add(egui::TextEdit::singleline(&mut s.sound_file).hint_text(hint_text).desired_width(ui.available_width()));
+            });
+        });
+    }
+    hint(ui, "Os sons do Halo são criados pelo próprio app, sem arquivos extras. A janela também pisca e pede atenção na barra de tarefas quando uma fase termina.");
 }
 
 fn music_tab(app: &mut App, ui: &mut egui::Ui) {

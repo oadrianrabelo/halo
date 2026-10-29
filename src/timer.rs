@@ -31,8 +31,14 @@ pub struct Settings {
     /// Começa a próxima fase automaticamente ao terminar a atual.
     pub auto_start: bool,
     pub sound: bool,
-    /// Arquivo de som personalizado. Vazio usa o som do sistema.
+    /// Arquivo de som personalizado (usado quando o som escolhido é "Arquivo…").
     pub sound_file: String,
+    /// Som quando o foco termina (começa a pausa).
+    pub sound_focus_end: crate::sound::Sound,
+    /// Som quando a pausa termina (volta o foco).
+    pub sound_break_end: crate::sound::Sound,
+    /// Volume dos sons do Halo (0 a 1).
+    pub sound_volume: f32,
     pub always_on_top: bool,
     /// Mostra a música tocando no sistema.
     pub music: bool,
@@ -66,6 +72,9 @@ impl Default for Settings {
             auto_start: false,
             sound: true,
             sound_file: String::new(),
+            sound_focus_end: crate::sound::Sound::Sino,
+            sound_break_end: crate::sound::Sound::Acorde,
+            sound_volume: 0.7,
             always_on_top: true,
             music: true,
             music_only_when_playing: true,

@@ -197,7 +197,9 @@ impl App {
             self.stats.record(stats::today(), self.settings.focus_min);
         }
         if self.settings.sound {
-            sound::notify(&self.settings.sound_file);
+            let s = &self.settings;
+            let which = if phase == Phase::Focus { s.sound_focus_end } else { s.sound_break_end };
+            sound::play(which, s.sound_volume, &s.sound_file);
         }
         self.flash_until = Some(now + Duration::from_secs(3));
         ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));

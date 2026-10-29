@@ -1,5 +1,10 @@
 # Novidades do Halo
 
+## 0.6.0
+
+- Sons novos, criados pelo próprio Halo: Sino, Gota, Madeira, Cristal, Acorde, Digital e Tigela tibetana. O som do sistema e o arquivo próprio continuam como opção.
+- Um som para o fim do foco e outro para o fim da pausa, com controle de volume e botão para ouvir (Preferências → Som).
+
 ## 0.5.0
 
 - Acha letra para muito mais músicas: o Halo limpa o nome antes de buscar ("(Ao Vivo)", "feat.", "Remastered", "Clipe Oficial", "Artista - Música" do YouTube, canais "VEVO") e tenta várias combinações.
