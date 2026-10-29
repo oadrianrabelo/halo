@@ -1,5 +1,9 @@
 # Novidades do Halo
 
+## 0.4.3
+
+- Remove a linha cinza de 1 px no topo da janela no Windows (sobra da barra de título que o Windows ainda reservava).
+
 ## 0.4.2
 
 - Corrige o retângulo escurecido em volta da janela no Windows: era a sombra que o Windows desenha embaixo de toda janela, visível pelos cantos transparentes do Halo.

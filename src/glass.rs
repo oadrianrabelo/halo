@@ -11,6 +11,9 @@ use raw_window_handle::HasWindowHandle;
 /// linha no topo em volta do formato arredondado. Aqui a moldura volta a zero, o desenho da parte
 /// "não cliente" (sombra) é desligado, a borda colorida do Windows 11 some e o sistema deixa de
 /// arredondar a janela por conta própria.
+///
+/// Por último, a janela deixa de ter o estilo de "janela com barra de título": mesmo sem barra,
+/// o Windows reservava 1 px no topo para ela, que aparecia como uma linha cinza.
 #[allow(unused_variables)]
 pub fn remove_system_border(window: &impl HasWindowHandle) {
     #[cfg(windows)]
@@ -21,6 +24,10 @@ pub fn remove_system_border(window: &impl HasWindowHandle) {
             DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
         };
         use windows_sys::Win32::UI::Controls::MARGINS;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GWL_STYLE, GetWindowLongPtrW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+            SetWindowLongPtrW, SetWindowPos, WS_CAPTION, WS_POPUP, WS_THICKFRAME,
+        };
 
         let Ok(handle) = window.window_handle() else { return };
         let RawWindowHandle::Win32(h) = handle.as_raw() else { return };
@@ -38,7 +45,17 @@ pub fn remove_system_border(window: &impl HasWindowHandle) {
                 DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE as u32, (&raw const corners).cast(), 4),
             ]
         };
-        log::info!("Moldura e sombra do Windows removidas (resultados: {results:x?})");
+        // Só mexe no estilo se ainda tiver barra/borda (o winit pode recolocar ao mostrar a janela).
+        let style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } as u32;
+        let popup = (style & !(WS_CAPTION | WS_THICKFRAME)) | WS_POPUP;
+        if popup != style {
+            unsafe {
+                SetWindowLongPtrW(hwnd, GWL_STYLE, popup as isize);
+                let flags = SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE;
+                SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, 0, 0, flags);
+            }
+        }
+        log::info!("Moldura e sombra do Windows removidas (resultados: {results:x?}, estilo {style:#x} → {popup:#x})");
     }
 }
 
