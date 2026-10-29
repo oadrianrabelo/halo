@@ -66,13 +66,14 @@ pub struct Media {
 }
 
 impl Media {
-    pub fn start(ctx: egui::Context, fetch_lyrics: bool) -> Self {
+    /// `lyrics: None` desliga a busca de letras.
+    pub fn start(ctx: egui::Context, lyrics: Option<lyrics::Options>) -> Self {
         let shared = Arc::new(Mutex::new(Shared::default()));
         let (tx, rx) = mpsc::channel();
         let state = shared.clone();
         thread::Builder::new()
             .name("halo-media".into())
-            .spawn(move || run(ctx, state, rx, fetch_lyrics))
+            .spawn(move || run(ctx, state, rx, lyrics))
             .expect("thread de mídia");
         Self { shared, commands: tx }
     }
@@ -87,7 +88,7 @@ impl Media {
     }
 }
 
-fn run(ctx: egui::Context, shared: Arc<Mutex<Shared>>, commands: Receiver<Command>, fetch_lyrics: bool) {
+fn run(ctx: egui::Context, shared: Arc<Mutex<Shared>>, commands: Receiver<Command>, opts: Option<lyrics::Options>) {
     let mut backend = platform::Backend::new();
     let mut cache: HashMap<String, Option<Arc<Lyrics>>> = HashMap::new();
     let mut last_track: Option<Track> = None;
@@ -101,7 +102,7 @@ fn run(ctx: egui::Context, shared: Arc<Mutex<Shared>>, commands: Receiver<Comman
 
         let lyrics = if track != last_track {
             match &track {
-                Some(t) if fetch_lyrics => {
+                Some(t) if opts.is_some() => {
                     let key = format!("{}\u{1}{}", t.artist, t.title);
                     match cache.get(&key) {
                         Some(found) => to_state(found),
@@ -111,7 +112,11 @@ fn run(ctx: egui::Context, shared: Arc<Mutex<Shared>>, commands: Receiver<Comman
                                 s.lyrics = LyricsState::Loading;
                             });
                             ctx.request_repaint();
-                            let found = lyrics::fetch(t).map(Arc::new);
+                            let found = opts.as_ref().and_then(|o| lyrics::fetch(t, o)).map(Arc::new);
+                            match &found {
+                                Some(l) => log::info!("Letra de \"{}\": {} ({})", t.title, l.source, if l.synced { "sincronizada" } else { "aproximada" }),
+                                None => log::info!("Sem letra para \"{}\" — {}", t.title, t.artist),
+                            }
                             let state = to_state(&found);
                             cache.insert(key, found);
                             state

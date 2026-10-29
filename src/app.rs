@@ -18,7 +18,7 @@ const SETTINGS_KEY: &str = "settings";
 const THEME_KEY: &str = "theme";
 const STATS_KEY: &str = "stats";
 /// Altura do painel de música, em escala 1.
-const MUSIC_PANEL: f32 = 72.0;
+const MUSIC_PANEL: f32 = 104.0;
 /// Duração da rolagem dos números e da troca de cor entre fases.
 const ROLL: f32 = 0.32;
 const PHASE_FADE: f32 = 0.7;
@@ -40,7 +40,8 @@ pub struct App {
     pub stats: Stats,
     /// Thread de música (só existe com a função ligada).
     pub media: Option<Media>,
-    media_lyrics: bool,
+    /// Opções de letra com que a thread de música foi iniciada.
+    media_lyrics: Option<crate::lyrics::Options>,
     /// Linha da letra atual e quando ela mudou (para animar).
     lyric: (Option<usize>, Instant),
     pub mode: Mode,
@@ -111,7 +112,7 @@ impl App {
             applied: None,
             stats,
             media: None,
-            media_lyrics: false,
+            media_lyrics: None,
             lyric: (None, long_ago),
             mode,
             first_frame: true,
@@ -207,9 +208,15 @@ impl App {
         let want = self.settings.music;
         if !want {
             self.media = None;
-        } else if self.media.is_none() || self.media_lyrics != self.settings.lyrics {
-            self.media = Some(Media::start(ctx.clone(), self.settings.lyrics));
-            self.media_lyrics = self.settings.lyrics;
+        } else {
+            let opts = self.settings.lyrics.then(|| crate::lyrics::Options {
+                plain: self.settings.lyrics_plain,
+                vagalume_key: self.settings.vagalume_key.trim().to_owned(),
+            });
+            if self.media.is_none() || self.media_lyrics != opts {
+                self.media = Some(Media::start(ctx.clone(), opts.clone()));
+                self.media_lyrics = opts;
+            }
         }
     }
 
@@ -484,19 +491,38 @@ impl App {
             return;
         };
 
-        // Linha de cima: música · artista, e os controles ao passar o mouse.
-        let row1 = inner.top() + 15.0 * s;
-        let controls_w = if hover > 0.01 { 66.0 * s } else { 0.0 };
-        let synced = matches!(lyrics, LyricsState::Found(_));
-        let head = if synced || pb.track.artist.is_empty() {
-            format!("{} · {}", pb.track.title, pb.track.artist).trim_end_matches(" · ").to_owned()
-        } else {
-            pb.track.artist.clone()
+        // Nome da música em destaque, artista embaixo (linha própria, sem disputar espaço) e a letra.
+        let controls_w = if hover > 0.01 { 70.0 * s } else { 0.0 };
+        let title_y = inner.top() + 10.0 * s;
+        let title_job = one_line(&pb.track.title, FontId::proportional(12.5 * s), t.text, inner.width() - controls_w);
+        p.galley(pos2(inner.left(), title_y), p.layout_job(title_job), t.text);
+
+        let artist_y = title_y + 17.0 * s;
+        let artist_color = w::lerp_color(t.secondary, t.text, 0.35);
+        let tag = match &lyrics {
+            // "≈": letra sem tempos, espalhada pela música (explicado nas Preferências).
+            LyricsState::Found(l) if !l.synced => Some("≈"),
+            LyricsState::Loading => Some("…"),
+            _ => None,
         };
-        let head_job = one_line(&head, FontId::proportional(10.5 * s), t.secondary, inner.width() - controls_w);
-        p.galley(pos2(inner.left(), row1 - 7.0 * s), p.layout_job(head_job), t.secondary);
+        let tag_w = if tag.is_some() { 16.0 * s } else { 0.0 };
+        if !pb.track.artist.is_empty() {
+            let artist_job = one_line(&pb.track.artist, FontId::proportional(11.0 * s), artist_color, inner.width() - tag_w);
+            p.galley(pos2(inner.left(), artist_y), p.layout_job(artist_job), artist_color);
+        }
+        if let Some(tag) = tag {
+            p.text(
+                pos2(inner.right(), artist_y + 6.5 * s),
+                Align2::RIGHT_CENTER,
+                tag,
+                FontId::proportional(11.0 * s),
+                t.secondary.gamma_multiply(0.85),
+            );
+        }
+
         if hover > 0.01 {
             let icon = 13.0 * s;
+            let row = title_y + 8.0 * s;
             let mut x = inner.right() - icon / 2.0;
             let play = if pb.playing { Icon::Pause } else { Icon::Play };
             for (id, icon_kind, cmd) in [
@@ -504,35 +530,39 @@ impl App {
                 ("m-play", play, media::Command::PlayPause),
                 ("m-prev", Icon::Previous, media::Command::Previous),
             ] {
-                let r = Rect::from_center_size(pos2(x, row1), Vec2::splat(icon));
+                let r = Rect::from_center_size(pos2(x, row), Vec2::splat(icon));
                 if w::icon_button(ui, r, id, icon_kind, t.text, hover).clicked() {
                     media.send(cmd);
                 }
-                x -= icon + 9.0 * s;
+                x -= icon + 10.0 * s;
             }
         }
 
-        // Embaixo: a linha atual da letra (ou o nome da música, se não houver letra).
-        let body = Rect::from_min_max(pos2(inner.left(), row1 + 9.0 * s), pos2(inner.right(), panel.bottom() - 6.0 * s));
-        let font = FontId::proportional(13.0 * s);
-        let (text, idx) = match &lyrics {
+        // A linha atual da letra.
+        let body = Rect::from_min_max(pos2(inner.left(), artist_y + 19.0 * s), pos2(inner.right(), panel.bottom() - 6.0 * s));
+        let (text, idx, color) = match &lyrics {
             LyricsState::Found(l) => {
                 let pos = pb.position_now(now) + self.settings.lyrics_offset;
                 let idx = l.line_at(pos);
-                let line = idx.map(|i| l.lines[i].1.trim()).filter(|x| !x.is_empty()).unwrap_or("♪");
-                (line.to_owned(), idx)
+                let line = idx.map(|i| l.lines[i].1.trim()).filter(|x| !x.is_empty());
+                match line {
+                    Some(line) => (line.to_owned(), idx, t.text),
+                    // Entre versos (ou antes da primeira linha). "…" porque nem toda fonte tem "♪".
+                    None => ("…".to_owned(), idx, t.secondary),
+                }
             }
-            LyricsState::Loading if self.settings.lyrics => (pb.track.title.clone(), None),
-            _ => (pb.track.title.clone(), None),
+            LyricsState::NotFound => ("Sem letra para esta música".to_owned(), None, t.secondary.gamma_multiply(0.7)),
+            _ => (String::new(), None, t.text),
         };
         if self.lyric.0 != idx {
             self.lyric = (idx, now);
         }
         let k = if t.animations { easing::cubic_out(((now - self.lyric.1).as_secs_f32() / 0.35).min(1.0)) } else { 1.0 };
-        let job = wrapped(&text, font, t.text.gamma_multiply(k), body.width(), 2);
+        let size = if color == t.text { 13.5 } else { 11.0 };
+        let job = wrapped(&text, FontId::proportional(size * s), color.gamma_multiply(k), body.width(), 2);
         let galley = p.layout_job(job);
         let y = body.top() + 6.0 * s * (1.0 - k);
-        p.galley(pos2(body.left(), y), galley, t.text);
+        p.galley(pos2(body.left(), y), galley, color);
     }
 
     /// Quanto falta para a próxima linha da letra (para redesenhar só nessa hora).

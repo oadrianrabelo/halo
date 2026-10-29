@@ -41,6 +41,10 @@ pub struct Settings {
     pub lyrics: bool,
     /// Adianta (+) ou atrasa (−) a letra, em segundos.
     pub lyrics_offset: f32,
+    /// Mostra letras sem tempos, espalhadas pela música (tempo aproximado).
+    pub lyrics_plain: bool,
+    /// Chave da API do Vagalume (opcional, para mais letras brasileiras).
+    pub vagalume_key: String,
     /// Meta de focos por dia (Histórico).
     pub daily_goal: u32,
     /// Mostra o ícone na bandeja do sistema.
@@ -67,6 +71,8 @@ impl Default for Settings {
             music_only_when_playing: true,
             lyrics: true,
             lyrics_offset: 0.0,
+            lyrics_plain: true,
+            vagalume_key: String::new(),
             daily_goal: 8,
             tray: true,
             minimize_to_tray: true,

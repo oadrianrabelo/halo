@@ -18,7 +18,8 @@ Um pomodoro flutuante, bonito e minúsculo para Windows, Linux e macOS, com a m�
   tamanho, cantos, opacidade, fonte (do sistema, embutida ou qualquer .ttf), peso dos números,
   efeito vidro nativo (Windows/macOS), som personalizado e o que aparece ou não na tela.
 - **Tocando agora + letra sincronizada:** mostra a música do sistema (Spotify, navegador, etc.) com a linha
-  atual da letra, buscada no [LRCLIB](https://lrclib.net). Controles de anterior, play/pausa e próxima ao passar o mouse.
+  atual da letra, buscada no [LRCLIB](https://lrclib.net) e, se você colar uma chave grátis, no
+  [Vagalume](https://www.vagalume.com.br/api/). Controles de anterior, play/pausa e próxima ao passar o mouse.
 - **Histórico:** focos de hoje, sequência de dias, meta diária, gráfico da semana e grade das últimas 16 semanas.
 - **Bandeja do sistema:** o ícone mostra o progresso do timer, a dica mostra o tempo restante e o menu
   inicia, pausa, pula e abre as Preferências. Dá para minimizar o Halo para lá.
@@ -117,7 +118,10 @@ Para testar no Linux sem um player de verdade, há um player MPRIS falso:
 dbus-run-session -- sh -c 'cargo run --example mock_player & sleep 1; cargo run'
 ```
 
-`HALO_LYRICS_API` aponta as letras para outro servidor compatível com o LRCLIB (útil em testes).
+`HALO_LYRICS_API` e `HALO_VAGALUME_API` apontam as letras para outros servidores compatíveis (útil em testes).
+
+O Letras.mus.br não tem API pública e copiar letras do site vai contra os termos de uso dele, por isso
+o Halo não busca lá.
 
 ## Estrutura
 

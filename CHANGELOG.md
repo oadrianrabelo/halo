@@ -1,5 +1,13 @@
 # Novidades do Halo
 
+## 0.5.0
+
+- Acha letra para muito mais músicas: o Halo limpa o nome antes de buscar ("(Ao Vivo)", "feat.", "Remastered", "Clipe Oficial", "Artista - Música" do YouTube, canais "VEVO") e tenta várias combinações.
+- Quando só existe a letra sem tempos, ela aparece mesmo assim, acompanhando a música de forma aproximada (marcada com ≈). Dá para desligar em Preferências → Música.
+- Nova fonte opcional de letras: Vagalume, forte em música brasileira. Basta colar a chave grátis da API em Preferências → Música.
+- Painel de música redesenhado: nome da música em destaque e o artista numa linha própria, sem ser cortado.
+- Preferências → Música mostra de onde veio a letra atual.
+
 ## 0.4.5
 
 - Resolve de vez a moldura no Windows: a janela agora é criada sem a "sombra de janela sem moldura", que era a origem da borda, da linha no topo e da barra antiga ao arrastar. Os remendos das versões 0.4.1 a 0.4.4 foram removidos.

@@ -27,11 +27,13 @@ pub struct State {
     pub whats_new: bool,
     /// Caminho de fonte sendo digitado (só aplica ao confirmar).
     font_path: String,
+    /// Chave do Vagalume sendo digitada (só aplica ao salvar).
+    vagalume_key: Option<String>,
 }
 
 impl Default for State {
     fn default() -> Self {
-        Self { open: false, tab: Tab::Timer, whats_new: false, font_path: String::new() }
+        Self { open: false, tab: Tab::Timer, whats_new: false, font_path: String::new(), vagalume_key: None }
     }
 }
 
@@ -480,10 +482,32 @@ fn music_tab(app: &mut App, ui: &mut egui::Ui) {
         rows.row("Só aparecer quando houver música", |ui| w::switch(ui, &mut s.music_only_when_playing, accent));
     });
     group(ui, "LETRAS", |rows| {
-        rows.row("Letra sincronizada", |ui| w::switch(ui, &mut s.lyrics, accent));
+        rows.row("Mostrar a letra", |ui| w::switch(ui, &mut s.lyrics, accent));
+        rows.row("Aceitar letra sem tempos (≈ aproximada)", |ui| w::switch(ui, &mut s.lyrics_plain, accent));
         rows.row("Ajuste de tempo", |ui| {
             ui.add(egui::Slider::new(&mut s.lyrics_offset, -3.0..=3.0).step_by(0.1).show_value(false));
             ui.label(format!("{:+.1} s", s.lyrics_offset));
+        });
+    });
+
+    // Vagalume: segunda fonte, forte em música brasileira. A chave só vale depois de salvar,
+    // para não reiniciar a busca a cada tecla.
+    let saved = app.settings.vagalume_key.clone();
+    let draft = app.prefs.vagalume_key.get_or_insert_with(|| saved.clone());
+    group(ui, "MAIS LETRAS (VAGALUME)", |rows| {
+        rows.full(|ui| {
+            ui.label("Chave da API do Vagalume (grátis). Ajuda muito com música brasileira.");
+            ui.horizontal(|ui| {
+                let edit = egui::TextEdit::singleline(draft).hint_text("Cole a chave aqui").desired_width(ui.available_width() - 80.0);
+                let resp = ui.add(edit);
+                let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if ui.add_enabled(*draft != saved, egui::Button::new("Salvar")).clicked() || enter {
+                    app.settings.vagalume_key = draft.trim().to_owned();
+                }
+            });
+            if ui.link("Como conseguir a chave").clicked() {
+                crate::update::open("https://www.vagalume.com.br/api/");
+            }
         });
     });
 
@@ -493,10 +517,11 @@ fn music_tab(app: &mut App, ui: &mut egui::Ui) {
         Some((None, _)) => "Nada tocando agora.".to_owned(),
         Some((Some(pb), lyrics)) => {
             let letra = match lyrics {
-                crate::media::LyricsState::Found(_) => "letra encontrada",
-                crate::media::LyricsState::Loading => "buscando letra…",
-                crate::media::LyricsState::NotFound => "sem letra sincronizada",
-                crate::media::LyricsState::None => "letras desligadas",
+                crate::media::LyricsState::Found(l) if l.synced => format!("letra sincronizada, {}", l.source),
+                crate::media::LyricsState::Found(l) => format!("letra aproximada, {}", l.source),
+                crate::media::LyricsState::Loading => "buscando letra…".to_owned(),
+                crate::media::LyricsState::NotFound => "letra não encontrada".to_owned(),
+                crate::media::LyricsState::None => "letras desligadas".to_owned(),
             };
             format!("{} — {} ({letra})", pb.track.title, pb.track.artist)
         }
@@ -513,7 +538,7 @@ fn music_tab(app: &mut App, ui: &mut egui::Ui) {
         "Funciona com qualquer player compatível com MPRIS: Spotify, navegadores, VLC, Rhythmbox, Elisa…"
     };
     hint(ui, how);
-    hint(ui, "Letras de lrclib.net. Se a letra estiver adiantada ou atrasada, use o ajuste de tempo.");
+    hint(ui, "Letras de lrclib.net (sincronizadas, quando existem) e do Vagalume (sem tempos). Se a letra estiver adiantada ou atrasada, use o ajuste de tempo.");
 }
 
 fn history_tab(app: &mut App, ui: &mut egui::Ui) {
