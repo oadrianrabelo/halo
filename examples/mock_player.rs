@@ -24,6 +24,8 @@ mod mpris {
                 ("xesam:artist".into(), v(Value::from(vec!["Artista Exemplo"]))),
                 ("xesam:album".into(), v(Value::from("Álbum"))),
                 ("mpris:length".into(), v(Value::from(180_000_000i64))),
+                // Capa opcional para testes: HALO_MOCK_ART=file:///caminho/capa.png
+                ("mpris:artUrl".into(), v(Value::from(std::env::var("HALO_MOCK_ART").unwrap_or_default()))),
             ])
         }
         #[zbus(property)]

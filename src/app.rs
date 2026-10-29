@@ -19,6 +19,11 @@ const THEME_KEY: &str = "theme";
 const STATS_KEY: &str = "stats";
 /// Altura do painel de música, em escala 1.
 const MUSIC_PANEL: f32 = 104.0;
+/// A mais no painel com a capa e com a letra karaokê (linha seguinte).
+const MUSIC_ART_EXTRA: f32 = 8.0;
+const MUSIC_KARAOKE_EXTRA: f32 = 20.0;
+/// Tempo da troca de cores quando muda a capa.
+const ART_FADE: f32 = 1.2;
 /// Duração da rolagem dos números e da troca de cor entre fases.
 const ROLL: f32 = 0.32;
 const PHASE_FADE: f32 = 0.7;
@@ -55,6 +60,10 @@ pub struct App {
     next_update_check: Instant,
     /// Reabrir o Halo ao fechar (depois de atualizar).
     relaunch: bool,
+    /// Textura da capa carregada (identificada pelo endereço do `Art`).
+    art_tex: Option<(usize, egui::TextureHandle)>,
+    /// Cores do gradiente em transição: de, para, quando começou e a capa de origem.
+    glow: ([Color32; 2], [Color32; 2], Instant, usize),
 }
 
 #[derive(PartialEq)]
@@ -123,6 +132,8 @@ impl App {
             // Primeira verificação alguns segundos depois de abrir, para não atrasar a inicialização.
             next_update_check: now + Duration::from_secs(5),
             relaunch: false,
+            art_tex: None,
+            glow: ([Color32::BLACK; 2], [Color32::BLACK; 2], long_ago, usize::MAX),
         }
     }
 
@@ -228,7 +239,15 @@ impl App {
     }
 
     fn window_size(&self) -> Vec2 {
-        let extra = if self.show_music_panel() { MUSIC_PANEL * self.theme.scale } else { 0.0 };
+        let t = &self.theme;
+        let mut panel = MUSIC_PANEL;
+        if t.music_art {
+            panel += MUSIC_ART_EXTRA;
+        }
+        if t.lyrics_style == crate::theme::LyricsStyle::Karaoke && self.settings.lyrics {
+            panel += MUSIC_KARAOKE_EXTRA;
+        }
+        let extra = if self.show_music_panel() { panel * t.scale } else { 0.0 };
         self.theme.window_size() + vec2(0.0, extra)
     }
 
@@ -358,7 +377,7 @@ impl App {
         let radius = CornerRadius::same(radius_f.round().min(255.0) as u8);
         let p = ui.painter().clone();
         if fluid {
-            let (glow_a, glow_b) = t.fluid_glows(accent);
+            let (glow_a, glow_b) = self.glows(now, accent);
             let backdrop = Backdrop {
                 base: t.background,
                 glow_a,
@@ -476,9 +495,56 @@ impl App {
     }
 
     /// Painel "tocando agora": música, artista e a linha atual da letra.
+    /// Cores do gradiente do estilo Fluido: as da capa (se ligado e houver capa) ou as do tema,
+    /// com uma transição suave quando a música muda.
+    fn glows(&mut self, now: Instant, accent: Color32) -> (Color32, Color32) {
+        let art = self.media.as_ref().and_then(|m| m.art()).filter(|_| self.theme.album_colors);
+        let key = art.as_ref().map_or(0, |a| std::sync::Arc::as_ptr(a) as usize);
+        let target = match &art {
+            Some(a) => {
+                let [c1, c2] = a.colors.map(|[r, g, b]| Color32::from_rgb(r, g, b));
+                [crate::theme::mix(c1, accent, 0.15), c2]
+            }
+            None => {
+                let (a, b) = self.theme.fluid_glows(accent);
+                [a, b]
+            }
+        };
+        let (from, to, at, old_key) = self.glow;
+        let k = easing::cubic_in_out(((now - at).as_secs_f32() / ART_FADE).min(1.0));
+        let shown = [w::lerp_color(from[0], to[0], k), w::lerp_color(from[1], to[1], k)];
+        if old_key == usize::MAX {
+            self.glow = (target, target, at, key); // primeira vez: sem transição
+            return (target[0], target[1]);
+        }
+        if key != old_key || (art.is_none() && to != target) {
+            self.glow = (shown, target, now, key);
+        }
+        (shown[0], shown[1])
+    }
+
+    fn glow_animating(&self, now: Instant) -> bool {
+        self.theme.style == Style::Fluid && (now - self.glow.2).as_secs_f32() < ART_FADE
+    }
+
+    /// Textura da capa atual (carrega na GPU só quando a capa muda).
+    fn art_texture(&mut self, ctx: &egui::Context) -> Option<egui::TextureHandle> {
+        let art = self.media.as_ref()?.art()?;
+        let key = std::sync::Arc::as_ptr(&art) as usize;
+        if self.art_tex.as_ref().map(|(k, _)| *k) != Some(key) {
+            let img = egui::ColorImage::from_rgba_unmultiplied(art.size, &art.rgba);
+            let tex = ctx.load_texture("capa", img, egui::TextureOptions::LINEAR);
+            self.art_tex = Some((key, tex));
+        }
+        self.art_tex.as_ref().map(|(_, t)| t.clone())
+    }
+
+    /// Painel "tocando agora": capa, música, artista e a letra.
     fn draw_music(&mut self, ui: &mut egui::Ui, panel: Rect, now: Instant, hover: f32) {
         let Some(media) = &self.media else { return };
         let (playback, lyrics) = media.snapshot();
+        let tex = if self.theme.music_art { self.art_texture(ui.ctx()) } else { None };
+        let Some(media) = &self.media else { return };
         let t = &self.theme;
         let s = t.scale;
         let p = ui.painter().clone();
@@ -493,11 +559,31 @@ impl App {
             return;
         };
 
-        // Nome da música em destaque, artista embaixo (linha própria, sem disputar espaço) e a letra.
+        // Capa à esquerda do nome e do artista (se houver e estiver ligada).
+        let art_size = 40.0 * s;
+        let mut text_left = inner.left();
+        let top = inner.top() + if t.music_art { 10.0 } else { 8.0 } * s;
+        if let Some(tex) = &tex {
+            let r = Rect::from_min_size(pos2(inner.left(), top), Vec2::splat(art_size));
+            p.rect_filled(r.translate(vec2(0.0, 1.5 * s)), CornerRadius::same((7.0 * s) as u8), Color32::from_black_alpha(50));
+            egui::Image::new(tex).corner_radius(7.0 * s).paint_at(ui, r);
+            text_left = r.right() + 10.0 * s;
+        } else if t.music_art {
+            // Sem capa: um quadradinho discreto no lugar, para o texto não pular quando a capa chegar.
+            let r = Rect::from_min_size(pos2(inner.left(), top), Vec2::splat(art_size));
+            p.rect_filled(r, CornerRadius::same((7.0 * s) as u8), t.text.gamma_multiply(0.06));
+            let c = r.center();
+            p.circle_stroke(c, art_size * 0.22, Stroke::new(1.5 * s, t.text.gamma_multiply(0.25)));
+            p.circle_filled(c, art_size * 0.06, t.text.gamma_multiply(0.25));
+            text_left = r.right() + 10.0 * s;
+        }
+        let text_w = inner.right() - text_left;
+
+        // Nome da música em destaque, artista numa linha própria.
         let controls_w = if hover > 0.01 { 70.0 * s } else { 0.0 };
-        let title_y = inner.top() + 10.0 * s;
-        let title_job = one_line(&pb.track.title, FontId::proportional(12.5 * s), t.text, inner.width() - controls_w);
-        p.galley(pos2(inner.left(), title_y), p.layout_job(title_job), t.text);
+        let title_y = top + 2.0 * s;
+        let title_job = one_line(&pb.track.title, FontId::proportional(12.5 * s), t.text, text_w - controls_w);
+        p.galley(pos2(text_left, title_y), p.layout_job(title_job), t.text);
 
         let artist_y = title_y + 17.0 * s;
         let artist_color = w::lerp_color(t.secondary, t.text, 0.35);
@@ -509,17 +595,11 @@ impl App {
         };
         let tag_w = if tag.is_some() { 16.0 * s } else { 0.0 };
         if !pb.track.artist.is_empty() {
-            let artist_job = one_line(&pb.track.artist, FontId::proportional(11.0 * s), artist_color, inner.width() - tag_w);
-            p.galley(pos2(inner.left(), artist_y), p.layout_job(artist_job), artist_color);
+            let artist_job = one_line(&pb.track.artist, FontId::proportional(11.0 * s), artist_color, text_w - tag_w);
+            p.galley(pos2(text_left, artist_y), p.layout_job(artist_job), artist_color);
         }
         if let Some(tag) = tag {
-            p.text(
-                pos2(inner.right(), artist_y + 6.5 * s),
-                Align2::RIGHT_CENTER,
-                tag,
-                FontId::proportional(11.0 * s),
-                t.secondary.gamma_multiply(0.85),
-            );
+            p.text(pos2(inner.right(), artist_y + 6.5 * s), Align2::RIGHT_CENTER, tag, FontId::proportional(11.0 * s), t.secondary.gamma_multiply(0.85));
         }
 
         if hover > 0.01 {
@@ -540,31 +620,72 @@ impl App {
             }
         }
 
-        // A linha atual da letra.
-        let body = Rect::from_min_max(pos2(inner.left(), artist_y + 19.0 * s), pos2(inner.right(), panel.bottom() - 6.0 * s));
-        let (text, idx, color) = match &lyrics {
+        // Letra.
+        let body_top = (artist_y + 19.0 * s).max(if t.music_art { top + art_size + 8.0 * s } else { 0.0 });
+        let body = Rect::from_min_max(pos2(inner.left(), body_top), pos2(inner.right(), panel.bottom() - 6.0 * s));
+        let karaoke = t.lyrics_style == crate::theme::LyricsStyle::Karaoke;
+        let animations = t.animations;
+        let (text, color, idx, lines) = match &lyrics {
             LyricsState::Found(l) => {
                 let pos = pb.position_now(now) + self.settings.lyrics_offset;
                 let idx = l.line_at(pos);
                 let line = idx.map(|i| l.lines[i].1.trim()).filter(|x| !x.is_empty());
                 match line {
-                    Some(line) => (line.to_owned(), idx, t.text),
+                    Some(line) => (line.to_owned(), t.text, idx, Some(l.clone())),
                     // Entre versos (ou antes da primeira linha). "…" porque nem toda fonte tem "♪".
-                    None => ("…".to_owned(), idx, t.secondary),
+                    None => ("…".to_owned(), t.secondary, idx, Some(l.clone())),
                 }
             }
-            LyricsState::NotFound => ("Sem letra para esta música".to_owned(), None, t.secondary.gamma_multiply(0.7)),
-            _ => (String::new(), None, t.text),
+            LyricsState::NotFound => ("Sem letra para esta música".to_owned(), t.secondary.gamma_multiply(0.7), None, None),
+            _ => (String::new(), t.text, None, None),
         };
+        let (text_color, secondary) = (t.text, t.secondary);
         if self.lyric.0 != idx {
             self.lyric = (idx, now);
         }
-        let k = if t.animations { easing::cubic_out(((now - self.lyric.1).as_secs_f32() / 0.35).min(1.0)) } else { 1.0 };
-        let size = if color == t.text { 13.5 } else { 11.0 };
-        let job = wrapped(&text, FontId::proportional(size * s), color.gamma_multiply(k), body.width(), 2);
-        let galley = p.layout_job(job);
-        let y = body.top() + 6.0 * s * (1.0 - k);
-        p.galley(pos2(body.left(), y), galley, color);
+        let k = if animations { easing::cubic_out(((now - self.lyric.1).as_secs_f32() / 0.35).min(1.0)) } else { 1.0 };
+
+        match (karaoke, &lines) {
+            (true, Some(l)) => {
+                // Karaokê: a linha atual em destaque e a próxima embaixo. Na troca, a de cima sobe e some
+                // e a próxima cresce até o lugar dela.
+                let next_of = |i: Option<usize>| -> Option<&str> {
+                    let start = i.map_or(0, |i| i + 1);
+                    l.lines.get(start..)?.iter().map(|(_, x)| x.trim()).find(|x| !x.is_empty())
+                };
+                let cur_font = 13.5 * s;
+                let next_font = 11.0 * s;
+                let clip = p.with_clip_rect(body.expand2(vec2(4.0, 0.0)));
+                // Linha que acabou de sair.
+                if k < 1.0
+                    && let Some(prev_i) = idx.and_then(|i| i.checked_sub(1))
+                {
+                    let prev = l.lines[prev_i].1.trim();
+                    let job = wrapped(prev, FontId::proportional(cur_font), text_color.gamma_multiply(1.0 - k), body.width(), 2);
+                    clip.galley(pos2(body.left(), body.top() - 18.0 * s * k), clip.layout_job(job), text_color);
+                }
+                // Linha atual (vindo da posição de "próxima").
+                let size = next_font + (cur_font - next_font) * k;
+                let c = w::lerp_color(secondary, color, k);
+                let job = wrapped(&text, FontId::proportional(size), c, body.width(), 2);
+                let g = clip.layout_job(job);
+                let cur_h = g.size().y;
+                let y = body.top() + 22.0 * s * (1.0 - k);
+                clip.galley(pos2(body.left(), y), g, c);
+                // Próxima linha, apagada.
+                if let Some(next) = next_of(idx) {
+                    let job = one_line(next, FontId::proportional(next_font), secondary.gamma_multiply(0.75 * k), body.width());
+                    clip.galley(pos2(body.left(), y + cur_h + 3.0 * s + 8.0 * s * (1.0 - k)), clip.layout_job(job), secondary);
+                }
+            }
+            _ => {
+                let size = if color == text_color { 13.5 } else { 11.0 };
+                let job = wrapped(&text, FontId::proportional(size * s), color.gamma_multiply(k), body.width(), 2);
+                let galley = p.layout_job(job);
+                let y = body.top() + 6.0 * s * (1.0 - k);
+                p.galley(pos2(body.left(), y), galley, color);
+            }
+        }
     }
 
     /// Quanto falta para a próxima linha da letra (para redesenhar só nessa hora).
@@ -714,7 +835,7 @@ impl eframe::App for App {
 
         // Redesenha só o necessário: animações curtas, timer 1x por segundo, parado nunca.
         let flashing = self.flash_until.is_some_and(|u| now < u);
-        if flashing || animating {
+        if flashing || animating || self.glow_animating(now) {
             ctx.request_repaint_after(Duration::from_millis(16));
         } else if self.flash_until.take().is_some() {
             ctx.request_repaint();

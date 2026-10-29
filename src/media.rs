@@ -4,6 +4,7 @@
 //! - Linux: MPRIS pelo D-Bus (Spotify, navegadores, VLC, Rhythmbox…).
 //! - macOS: AppleScript para Spotify e Música.
 
+use crate::art::{self, Art};
 use crate::lyrics::{self, Lyrics};
 use eframe::egui;
 use std::collections::HashMap;
@@ -57,6 +58,7 @@ pub enum LyricsState {
 pub struct Shared {
     pub playback: Option<Playback>,
     pub lyrics: LyricsState,
+    pub art: Option<Arc<Art>>,
 }
 
 /// Thread de leitura. Para sozinha quando este valor é descartado.
@@ -82,6 +84,11 @@ impl Media {
         let _ = self.commands.send(cmd);
     }
 
+    /// Capa da música atual, se houver.
+    pub fn art(&self) -> Option<Arc<Art>> {
+        self.shared.lock().ok()?.art.clone()
+    }
+
     pub fn snapshot(&self) -> (Option<Playback>, LyricsState) {
         let s = self.shared.lock().unwrap_or_else(|e| e.into_inner());
         (s.playback.clone(), s.lyrics.clone())
@@ -93,12 +100,39 @@ fn run(ctx: egui::Context, shared: Arc<Mutex<Shared>>, commands: Receiver<Comman
     let mut cache: HashMap<String, Option<Arc<Lyrics>>> = HashMap::new();
     let mut last_track: Option<Track> = None;
     let mut last_playing = false;
+    let mut art_cache: HashMap<String, Arc<Art>> = HashMap::new();
+    // Alguns players só entregam a capa um instante depois de trocar de música: tenta mais algumas vezes.
+    let mut art_tries = 0;
 
     loop {
         let playback = backend.query();
         let track = playback.as_ref().map(|p| p.track.clone());
         let playing = playback.as_ref().is_some_and(|p| p.playing);
         let changed = track != last_track || playing != last_playing;
+
+        if track != last_track {
+            set(&shared, |s| s.art = None);
+            art_tries = 4;
+        }
+        if let Some(t) = &track
+            && art_tries > 0
+        {
+            art_tries -= 1;
+            let key = format!("{}\u{1}{}\u{1}{}", t.artist, t.album, t.title);
+            let found = art_cache.get(&key).cloned().or_else(|| {
+                let a = backend.art().and_then(art::load).map(Arc::new)?;
+                if art_cache.len() > 40 {
+                    art_cache.clear();
+                }
+                art_cache.insert(key, a.clone());
+                Some(a)
+            });
+            if found.is_some() {
+                art_tries = 0;
+                set(&shared, |s| s.art = found);
+                ctx.request_repaint();
+            }
+        }
 
         let lyrics = if track != last_track {
             match &track {
@@ -220,6 +254,21 @@ mod platform {
             })
         }
 
+        pub fn art(&mut self) -> Option<crate::art::Source> {
+            use windows::Storage::Streams::DataReader;
+            let props = self.session()?.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
+            let stream = props.Thumbnail().ok()?.OpenReadAsync().ok()?.join().ok()?;
+            let size = stream.Size().ok()? as u32;
+            if size == 0 || size > 10 * 1024 * 1024 {
+                return None;
+            }
+            let reader = DataReader::CreateDataReader(&stream).ok()?;
+            reader.LoadAsync(size).ok()?.join().ok()?;
+            let mut buf = vec![0u8; size as usize];
+            reader.ReadBytes(&mut buf).ok()?;
+            Some(crate::art::Source::Bytes(buf))
+        }
+
         pub fn send(&mut self, cmd: Command) {
             let Some(s) = self.session() else { return };
             let op = match cmd {
@@ -247,11 +296,12 @@ mod platform {
         conn: Option<Connection>,
         /// Último player usado, para os comandos irem para o mesmo.
         current: Option<String>,
+        art_url: Option<String>,
     }
 
     impl Backend {
         pub fn new() -> Self {
-            Self { conn: Connection::session().ok(), current: None }
+            Self { conn: Connection::session().ok(), current: None, art_url: None }
         }
 
         fn player(&self, name: &str) -> Option<Proxy<'static>> {
@@ -302,12 +352,17 @@ mod platform {
             let duration = meta.get("mpris:length").and_then(micros).map(|us| us as f32 / 1e6);
             let position = p.get_property::<i64>("Position").map(|us| us as f32 / 1e6).unwrap_or(0.0);
             self.current = Some(name);
+            self.art_url = Some(text("mpris:artUrl")).filter(|u| !u.is_empty());
             Some(Playback {
                 track: Track { title, artist, album: text("xesam:album"), duration },
                 playing: status == "Playing",
                 position,
                 at: Instant::now(),
             })
+        }
+
+        pub fn art(&mut self) -> Option<crate::art::Source> {
+            self.art_url.clone().map(crate::art::Source::Url)
         }
 
         pub fn send(&mut self, cmd: Command) {
@@ -335,8 +390,10 @@ mod platform {
             r#"tell application "{app}"
     if player state is stopped then return ""
     set t to current track
-    return (player state as text) & tab & (name of t) & tab & (artist of t) & tab & (album of t) & tab & (duration of t) & tab & player position
-end tell"#
+    return (player state as text) & tab & (name of t) & tab & (artist of t) & tab & (album of t) & tab & (duration of t) & tab & player position{art}
+end tell"#,
+            // Só o Spotify informa a capa como link.
+            art = if app == "Spotify" { " & tab & (artwork url of t)" } else { "" }
         )
     }
 
@@ -346,11 +403,12 @@ end tell"#
 
     pub struct Backend {
         app: Option<String>,
+        art_url: Option<String>,
     }
 
     impl Backend {
         pub fn new() -> Self {
-            Self { app: None }
+            Self { app: None, art_url: None }
         }
 
         pub fn query(&mut self) -> Option<Playback> {
@@ -368,12 +426,17 @@ end tell"#
                 duration = duration.map(|d| d / 1000.0);
             }
             self.app = Some(app.to_owned());
+            self.art_url = f.get(6).map(|u| u.trim().to_owned()).filter(|u| u.starts_with("http"));
             Some(Playback {
                 track: Track { title: f[1].to_owned(), artist: f[2].to_owned(), album: f[3].to_owned(), duration },
                 playing: f[0] == "playing",
                 position: num(f[5]).unwrap_or(0.0),
                 at: Instant::now(),
             })
+        }
+
+        pub fn art(&mut self) -> Option<crate::art::Source> {
+            self.art_url.clone().map(crate::art::Source::Url)
         }
 
         pub fn send(&mut self, cmd: Command) {

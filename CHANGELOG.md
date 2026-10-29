@@ -1,5 +1,12 @@
 # Novidades do Halo
 
+## 0.7.0
+
+- Capa do álbum no painel de música (Windows: qualquer app dos controles de mídia; Linux: players MPRIS; macOS: Spotify).
+- No estilo Fluido, o gradiente pega as cores da capa da música tocando e muda suavemente quando a música troca.
+- Letra estilo karaokê: a linha atual em destaque e a próxima embaixo, rolando na troca. O estilo de uma linha continua disponível.
+- Tudo isso pode ser ligado e desligado em Preferências → Música.
+
 ## 0.6.0
 
 - Sons novos, criados pelo próprio Halo: Sino, Gota, Madeira, Cristal, Acorde, Digital e Tigela tibetana. O som do sistema e o arquivo próprio continuam como opção.

@@ -496,11 +496,19 @@ fn sound_tab(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn music_tab(app: &mut App, ui: &mut egui::Ui) {
+    use crate::theme::LyricsStyle;
     let accent = accent(&app.theme);
+    let t = &mut app.theme;
     let s = &mut app.settings;
     group(ui, "TOCANDO AGORA", |rows| {
         rows.row("Mostrar a música tocando", |ui| w::switch(ui, &mut s.music, accent));
         rows.row("Só aparecer quando houver música", |ui| w::switch(ui, &mut s.music_only_when_playing, accent));
+        rows.row("Capa do álbum", |ui| w::switch(ui, &mut t.music_art, accent));
+        rows.row("Cores da capa no estilo Fluido", |ui| w::switch(ui, &mut t.album_colors, accent));
+        rows.row("Estilo da letra", |ui| {
+            let opts = [(LyricsStyle::Line, "Uma linha"), (LyricsStyle::Karaoke, "Karaokê")];
+            w::segmented(ui, &mut t.lyrics_style, &opts, 180.0);
+        });
     });
     group(ui, "LETRAS", |rows| {
         rows.row("Mostrar a letra", |ui| w::switch(ui, &mut s.lyrics, accent));

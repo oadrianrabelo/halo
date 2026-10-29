@@ -1266,10 +1266,11 @@ dependencies = [
 
 [[package]]
 name = "halo"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "chrono",
  "eframe",
+ "image",
  "ksni",
  "log",
  "raw-window-handle",
@@ -1389,6 +1390,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]

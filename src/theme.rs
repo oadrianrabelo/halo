@@ -106,6 +106,19 @@ pub struct Theme {
     pub glass: bool,
     /// Contorno fino em volta da janela.
     pub outline: bool,
+    /// Capa do álbum no painel de música.
+    pub music_art: bool,
+    /// No estilo Fluido, o gradiente usa as cores da capa da música tocando.
+    pub album_colors: bool,
+    pub lyrics_style: LyricsStyle,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LyricsStyle {
+    /// Só a linha atual.
+    Line,
+    /// Linha atual em destaque e a próxima embaixo, rolando.
+    Karaoke,
 }
 
 impl Default for Theme {
@@ -135,6 +148,9 @@ impl Default for Theme {
             traffic_lights: true,
             glass: false,
             outline: true,
+            music_art: true,
+            album_colors: true,
+            lyrics_style: LyricsStyle::Karaoke,
         };
         t.apply_preset(&PRESETS[0]);
         t
