@@ -1,5 +1,10 @@
 # Novidades do Halo
 
+## 0.4.4
+
+- Agora sim, sem linha no topo da janela no Windows: o Halo passa a definir ele mesmo a área da janela, em vez de deixar o Windows reservar 1 px para a barra de título.
+- Corrige a barra de título antiga (estilo Windows 7) que aparecia por um instante ao arrastar a janela.
+
 ## 0.4.3
 
 - Remove a linha cinza de 1 px no topo da janela no Windows (sobra da barra de título que o Windows ainda reservava).

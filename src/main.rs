@@ -19,6 +19,7 @@ mod timer;
 mod tray;
 mod update;
 mod widgets;
+mod winframe;
 
 use eframe::egui;
 
