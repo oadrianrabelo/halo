@@ -54,6 +54,7 @@ pub struct App {
     next_update_check: Instant,
     /// Reabrir o Halo ao fechar (depois de atualizar).
     relaunch: bool,
+    last_focused: Option<bool>,
 }
 
 #[derive(PartialEq)]
@@ -122,6 +123,7 @@ impl App {
             // Primeira verificação alguns segundos depois de abrir, para não atrasar a inicialização.
             next_update_check: now + Duration::from_secs(5),
             relaunch: false,
+            last_focused: None,
         }
     }
 
@@ -250,8 +252,11 @@ impl App {
             let level = if next.on_top { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
             ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
         }
-        if prev.is_none() {
+        // O Windows pode refazer a sombra quando a janela ganha ou perde o foco; tira de novo.
+        let focused = ctx.input(|i| i.viewport().focused);
+        if prev.is_none() || focused != self.last_focused {
             glass::remove_system_border(frame);
+            self.last_focused = focused;
         }
         if prev.as_ref().is_none_or(|p| p.glass != next.glass) && glass::supported() {
             let (on, radius, dark) = next.glass;

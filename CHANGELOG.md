@@ -1,5 +1,9 @@
 # Novidades do Halo
 
+## 0.4.2
+
+- Corrige o retângulo escurecido em volta da janela no Windows: era a sombra que o Windows desenha embaixo de toda janela, visível pelos cantos transparentes do Halo.
+
 ## 0.4.1
 
 - Corrige a borda translúcida em volta da janela no Windows (era a moldura de 1 px que o Windows desenha em toda janela).

@@ -3,20 +3,22 @@
 
 use raw_window_handle::HasWindowHandle;
 
-/// Tira a moldura de 1 px que o Windows desenha em volta da janela.
+/// Tira a moldura e a sombra que o Windows desenha na janela.
 ///
-/// O egui pede ao Windows a "sombra de janela sem moldura", e o Windows faz isso estendendo a
-/// moldura 1 px para dentro da janela. Numa janela transparente com cantos arredondados, isso
-/// aparece como um retângulo fino e translúcido em volta do Halo. Aqui a moldura volta a zero,
-/// a borda colorida do Windows 11 some e o sistema deixa de arredondar a janela por conta própria.
+/// O egui pede ao Windows a "sombra de janela sem moldura". O Windows estende a moldura 1 px
+/// para dentro da janela e desenha uma sombra embaixo dela inteira. Numa janela opaca isso não
+/// aparece, mas os cantos do Halo são transparentes: dava para ver um retângulo escurecido e uma
+/// linha no topo em volta do formato arredondado. Aqui a moldura volta a zero, o desenho da parte
+/// "não cliente" (sombra) é desligado, a borda colorida do Windows 11 some e o sistema deixa de
+/// arredondar a janela por conta própria.
 #[allow(unused_variables)]
 pub fn remove_system_border(window: &impl HasWindowHandle) {
     #[cfg(windows)]
     {
         use raw_window_handle::RawWindowHandle;
         use windows_sys::Win32::Graphics::Dwm::{
-            DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
-            DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
+            DWMNCRP_DISABLED, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_NCRENDERING_POLICY,
+            DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
         };
         use windows_sys::Win32::UI::Controls::MARGINS;
 
@@ -26,15 +28,17 @@ pub fn remove_system_border(window: &impl HasWindowHandle) {
         let margins = MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 0, cyBottomHeight: 0 };
         let none = DWMWA_COLOR_NONE;
         let corners = DWMWCP_DONOTROUND;
+        let no_shadow = DWMNCRP_DISABLED;
         // As duas últimas só existem no Windows 11; no 10 o Windows ignora e segue normal.
         let results = unsafe {
             [
                 DwmExtendFrameIntoClientArea(hwnd, &margins),
+                DwmSetWindowAttribute(hwnd, DWMWA_NCRENDERING_POLICY as u32, (&raw const no_shadow).cast(), 4),
                 DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR as u32, (&raw const none).cast(), 4),
                 DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE as u32, (&raw const corners).cast(), 4),
             ]
         };
-        log::info!("Moldura do Windows removida (resultados: {results:x?})");
+        log::info!("Moldura e sombra do Windows removidas (resultados: {results:x?})");
     }
 }
 
