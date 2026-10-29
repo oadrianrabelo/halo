@@ -1,6 +1,6 @@
 [package]
 name = "halo"
-version = "0.4.4"
+version = "0.4.5"
 edition = "2024"
 
 [dependencies]
@@ -24,7 +24,7 @@ tray-icon = { version = "0.26", default-features = false }
 # No Windows também há o renderizador wgpu (DirectX / software) como plano B.
 eframe = { version = "0.37", default-features = false, features = ["wgpu"] }
 windows = { version = "0.62", features = ["Media_Control", "Foundation"] }
-windows-sys = { version = "0.61", features = ["Win32_Graphics_Dwm", "Win32_UI_Controls", "Win32_Media_Audio", "Win32_System_Diagnostics_Debug", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Media_Audio", "Win32_System_Diagnostics_Debug", "Win32_UI_WindowsAndMessaging"] }
 
 [build-dependencies]
 # Só é usado quando o alvo é Windows (ícone e versão do .exe).
@@ -39,3 +39,7 @@ strip = true
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dev-dependencies]
 zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+
+[patch.crates-io]
+# Ver vendor/README.md: permite desligar a sombra que deixava borda na janela no Windows.
+egui-winit = { path = "vendor/egui-winit" }

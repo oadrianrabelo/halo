@@ -1,5 +1,10 @@
 # Novidades do Halo
 
+## 0.4.5
+
+- Resolve de vez a moldura no Windows: a janela agora é criada sem a "sombra de janela sem moldura", que era a origem da borda, da linha no topo e da barra antiga ao arrastar. Os remendos das versões 0.4.1 a 0.4.4 foram removidos.
+- Corrige o efeito vidro no Windows (ficava preto ao ligar e parecia ligado ao desligar).
+
 ## 0.4.4
 
 - Agora sim, sem linha no topo da janela no Windows: o Halo passa a definir ele mesmo a área da janela, em vez de deixar o Windows reservar 1 px para a barra de título.

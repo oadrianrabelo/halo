@@ -250,9 +250,6 @@ impl App {
             let level = if next.on_top { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
             ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
         }
-        if prev.is_none() {
-            crate::winframe::apply(frame);
-        }
         if prev.as_ref().is_none_or(|p| p.glass != next.glass) && glass::supported() {
             let (on, radius, dark) = next.glass;
             self.glass_error = glass::set(frame, on, radius as f32, dark).err();

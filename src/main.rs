@@ -19,7 +19,6 @@ mod timer;
 mod tray;
 mod update;
 mod widgets;
-mod winframe;
 
 use eframe::egui;
 
@@ -44,6 +43,9 @@ fn main() {
                 .with_resizable(false)
                 .with_decorations(false)
                 .with_transparent(mode.transparent())
+                // Sem a sombra de janela sem moldura: no Windows ela deixava borda em volta da janela
+                // (ver vendor/README.md); no macOS evita "fantasmas" quando o formato muda.
+                .with_has_shadow(false)
                 .with_always_on_top()
                 .with_taskbar(true),
             ..Default::default()
