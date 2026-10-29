@@ -63,6 +63,8 @@ pub struct Backdrop {
     pub dark: bool,
     /// Segundos desde o início, usado para o movimento das manchas.
     pub time: f32,
+    /// Contorno fino (brilho em cima, sombra embaixo).
+    pub outline: bool,
 }
 
 impl Backdrop {
@@ -90,6 +92,9 @@ impl Backdrop {
             Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), alpha)
         });
 
+        if !self.outline {
+            return;
+        }
         // Borda: brilho em cima, sombra embaixo. Também esconde o serrilhado da malha.
         let cr = CornerRadius::same(radius.round().min(255.0) as u8);
         let rim = if self.dark { Color32::from_white_alpha(28) } else { Color32::from_white_alpha(140) };

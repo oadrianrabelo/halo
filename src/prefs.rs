@@ -137,6 +137,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 opacity: 1.0,
                 dark: t.is_dark(),
                 time: 0.0,
+                outline: false,
             };
             backdrop.paint(ui.painter(), ui.max_rect(), 0.0);
         } else {
@@ -351,6 +352,7 @@ fn appearance_tab(app: &mut App, ui: &mut egui::Ui) {
         rows.row("Progresso", |ui| w::switch(ui, &mut t.show_progress, accent));
         rows.row("Esconder controles enquanto roda", |ui| w::switch(ui, &mut t.controls_on_hover, accent));
         rows.row("Animações suaves", |ui| w::switch(ui, &mut t.animations, accent));
+        rows.row("Contorno fino", |ui| w::switch(ui, &mut t.outline, accent));
         if t.style == Style::Classic {
             rows.row("Botões estilo macOS", |ui| w::switch(ui, &mut t.traffic_lights, accent));
         }
@@ -372,7 +374,7 @@ fn style_card(ui: &mut egui::Ui, style: Style, name: &str, desc: &str, selected:
         }
         Style::Fluid => {
             let [a, b] = preset.glow.map(crate::theme::hex);
-            Backdrop { base: bg, glow_a: a, glow_b: b, opacity: 1.0, dark: true, time: 0.0 }.paint(p, preview, 12.0);
+            Backdrop { base: bg, glow_a: a, glow_b: b, opacity: 1.0, dark: true, time: 0.0, outline: true }.paint(p, preview, 12.0);
             fluid::glow_ring(p, preview.center(), 22.0, 3.5, 0.62, fg.gamma_multiply(0.1), focus);
         }
     }

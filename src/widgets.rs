@@ -379,7 +379,7 @@ pub fn theme_swatch(ui: &mut Ui, preset: &crate::theme::Preset, style: crate::th
         crate::theme::Style::Fluid => {
             let [a, b] = preset.glow.map(crate::theme::hex);
             let dark = 0.299 * bg.r() as f32 + 0.587 * bg.g() as f32 + 0.114 * bg.b() as f32 <= 128.0;
-            crate::fluid::Backdrop { base: bg, glow_a: a, glow_b: b, opacity: 1.0, dark, time: 0.0 }.paint(p, card, 9.0);
+            crate::fluid::Backdrop { base: bg, glow_a: a, glow_b: b, opacity: 1.0, dark, time: 0.0, outline: true }.paint(p, card, 9.0);
             crate::fluid::glow_ring(p, card.center(), 12.0, 2.5, 0.65, fg.gamma_multiply(0.12), accent);
         }
     }

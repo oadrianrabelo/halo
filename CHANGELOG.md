@@ -1,5 +1,10 @@
 # Novidades do Halo
 
+## 0.4.1
+
+- Corrige a borda translúcida em volta da janela no Windows (era a moldura de 1 px que o Windows desenha em toda janela).
+- Nova opção "Contorno fino" em Preferências → Aparência, para tirar também o contorno desenhado pelo Halo.
+
 ## 0.4.0
 
 - Corrige o Halo fechando sozinho ao abrir em alguns computadores com Windows: agora ele tenta outros modos de desenhar a janela (sem transparência, DirectX e software) até um funcionar.

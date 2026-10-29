@@ -250,6 +250,9 @@ impl App {
             let level = if next.on_top { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
             ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
         }
+        if prev.is_none() {
+            glass::remove_system_border(frame);
+        }
         if prev.as_ref().is_none_or(|p| p.glass != next.glass) && glass::supported() {
             let (on, radius, dark) = next.glass;
             self.glass_error = glass::set(frame, on, radius as f32, dark).err();
@@ -357,12 +360,15 @@ impl App {
                 opacity: t.opacity,
                 dark,
                 time: (now - self.started).as_secs_f32(),
+                outline: t.outline,
             };
             backdrop.paint(&p, full, radius_f);
         } else {
             let [r, g, b, _] = t.background.to_array();
             p.rect_filled(full, radius, Color32::from_rgba_unmultiplied(r, g, b, (t.opacity * 255.0) as u8));
-            p.rect_stroke(full.shrink(0.5), radius, Stroke::new(1.0, t.text.gamma_multiply(0.08)), StrokeKind::Inside);
+            if t.outline {
+                p.rect_stroke(full.shrink(0.5), radius, Stroke::new(1.0, t.text.gamma_multiply(0.08)), StrokeKind::Inside);
+            }
         }
         if let Some(until) = self.flash_until.filter(|u| now < *u) {
             let phase = (until - now).as_secs_f32() * std::f32::consts::TAU / 1.2;

@@ -104,6 +104,8 @@ pub struct Theme {
     pub traffic_lights: bool,
     /// Desfoque nativo atrás da janela (Windows/macOS).
     pub glass: bool,
+    /// Contorno fino em volta da janela.
+    pub outline: bool,
 }
 
 impl Default for Theme {
@@ -132,6 +134,7 @@ impl Default for Theme {
             controls_on_hover: true,
             traffic_lights: true,
             glass: false,
+            outline: true,
         };
         t.apply_preset(&PRESETS[0]);
         t
