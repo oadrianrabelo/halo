@@ -39,6 +39,7 @@ impl Default for State {
 
 #[derive(Clone, Copy, PartialEq)]
 enum FontKind {
+    Inter,
     System,
     Builtin,
     File,
@@ -276,7 +277,7 @@ fn appearance_tab(app: &mut App, ui: &mut egui::Ui) {
     group(ui, "FORMA", |rows| {
         rows.row("Layout", |ui| {
             let opts = LayoutKind::ALL.map(|l| (l, l.label()));
-            w::segmented(ui, &mut t.layout, &opts, 200.0);
+            w::segmented(ui, &mut t.layout, &opts, 260.0);
         });
         rows.row("Tamanho", |ui| {
             ui.add(egui::Slider::new(&mut t.scale, 0.7..=2.0).show_value(false));
@@ -311,14 +312,16 @@ fn appearance_tab(app: &mut App, ui: &mut egui::Ui) {
 
     group(ui, "FONTE", |rows| {
         let mut kind = match t.font {
+            FontChoice::Inter => FontKind::Inter,
             FontChoice::System => FontKind::System,
             FontChoice::Builtin => FontKind::Builtin,
             FontChoice::Custom(_) => FontKind::File,
         };
         rows.row("Fonte", |ui| {
-            let opts = [(FontKind::System, "Sistema"), (FontKind::Builtin, "Embutida"), (FontKind::File, "Arquivo")];
-            if w::segmented(ui, &mut kind, &opts, 210.0).changed() {
+            let opts = [(FontKind::Inter, "Inter"), (FontKind::System, "Sistema"), (FontKind::Builtin, "Simples"), (FontKind::File, "Arquivo")];
+            if w::segmented(ui, &mut kind, &opts, 260.0).changed() {
                 t.font = match kind {
+                    FontKind::Inter => FontChoice::Inter,
                     FontKind::System => FontChoice::System,
                     FontKind::Builtin => FontChoice::Builtin,
                     FontKind::File => FontChoice::Custom(app.prefs.font_path.clone()),
@@ -355,6 +358,7 @@ fn appearance_tab(app: &mut App, ui: &mut egui::Ui) {
         rows.row("Esconder controles enquanto roda", |ui| w::switch(ui, &mut t.controls_on_hover, accent));
         rows.row("Animações suaves", |ui| w::switch(ui, &mut t.animations, accent));
         rows.row("Contorno fino", |ui| w::switch(ui, &mut t.outline, accent));
+        rows.row("Modo Zen (só o tempo até passar o mouse)", |ui| w::switch(ui, &mut t.zen, accent));
         if t.style == Style::Classic {
             rows.row("Botões estilo macOS", |ui| w::switch(ui, &mut t.traffic_lights, accent));
         }

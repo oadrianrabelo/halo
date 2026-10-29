@@ -12,16 +12,22 @@ pub enum LayoutKind {
     Pill,
     /// Só os números.
     Minimal,
+    /// Pílula pequena que se expande num cartão ao passar o mouse.
+    Island,
 }
 
+/// Tamanho da Ilha aberta (sem o painel de música), em escala 1.
+pub const ISLAND_OPEN: Vec2 = Vec2::new(300.0, 152.0);
+
 impl LayoutKind {
-    pub const ALL: [LayoutKind; 3] = [LayoutKind::Ring, LayoutKind::Pill, LayoutKind::Minimal];
+    pub const ALL: [LayoutKind; 4] = [LayoutKind::Ring, LayoutKind::Pill, LayoutKind::Minimal, LayoutKind::Island];
 
     pub fn label(self) -> &'static str {
         match self {
             LayoutKind::Ring => "Anel",
             LayoutKind::Pill => "Pílula",
             LayoutKind::Minimal => "Mínimo",
+            LayoutKind::Island => "Ilha",
         }
     }
 
@@ -31,6 +37,8 @@ impl LayoutKind {
             LayoutKind::Ring => Vec2::new(176.0, 176.0),
             LayoutKind::Pill => Vec2::new(252.0, 68.0),
             LayoutKind::Minimal => Vec2::new(136.0, 52.0),
+            // Ilha fechada; aberta ela usa `ISLAND_OPEN`.
+            LayoutKind::Island => Vec2::new(172.0, 44.0),
         }
     }
 }
@@ -65,6 +73,8 @@ pub enum FontChoice {
     System,
     /// Fonte embutida no egui.
     Builtin,
+    /// Inter, embutida no Halo (a mesma em todos os sistemas).
+    Inter,
     /// Caminho para um .ttf/.otf qualquer.
     Custom(String),
 }
@@ -106,6 +116,8 @@ pub struct Theme {
     pub glass: bool,
     /// Contorno fino em volta da janela.
     pub outline: bool,
+    /// Modo Zen: só o tempo fica na tela; o resto aparece ao passar o mouse.
+    pub zen: bool,
     /// Capa do álbum no painel de música.
     pub music_art: bool,
     /// No estilo Fluido, o gradiente usa as cores da capa da música tocando.
@@ -148,6 +160,7 @@ impl Default for Theme {
             traffic_lights: true,
             glass: false,
             outline: true,
+            zen: false,
             music_art: true,
             album_colors: true,
             lyrics_style: LyricsStyle::Karaoke,
@@ -195,6 +208,7 @@ impl Theme {
                 self.traffic_lights = true;
             }
             Style::Fluid => {
+                self.font = FontChoice::Inter;
                 self.corner_radius = 30.0;
                 self.opacity = 0.97;
                 self.digit_weight = DigitWeight::Bold;

@@ -1,5 +1,11 @@
 # Novidades do Halo
 
+## 0.8.0
+
+- Novo layout Ilha: uma pílula pequena com o tempo, a capa e um anelzinho de progresso, que se abre num cartão com tudo (controles, música e letra) ao passar o mouse e também quando uma fase termina.
+- Fonte Inter embutida (a mesma em todos os sistemas), escolhida automaticamente no estilo Fluido. Sistema, Simples e Arquivo continuam como opção.
+- Modo Zen: só o tempo fica na tela; anel, nome da fase, bolinhas e barra aparecem ao passar o mouse (Preferências → Aparência → Detalhes).
+
 ## 0.7.0
 
 - Capa do álbum no painel de música (Windows: qualquer app dos controles de mídia; Linux: players MPRIS; macOS: Spotify).

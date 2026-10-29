@@ -30,6 +30,12 @@ pub fn apply(ctx: &egui::Context, choice: &FontChoice, weight: DigitWeight) -> R
 
     let faces = match choice {
         FontChoice::Builtin => Faces::default(),
+        // Inter recortada para o alfabeto latino (~50 KB por peso). Licença em assets/fonts.
+        FontChoice::Inter => Faces {
+            regular: Some(include_bytes!("../assets/fonts/Inter-Regular.ttf").to_vec()),
+            light: Some(include_bytes!("../assets/fonts/Inter-Light.ttf").to_vec()),
+            bold: Some(include_bytes!("../assets/fonts/Inter-SemiBold.ttf").to_vec()),
+        },
         FontChoice::System => system_fonts(),
         FontChoice::Custom(path) => match std::fs::read(path) {
             Ok(bytes) => Faces { regular: Some(bytes), ..Default::default() },

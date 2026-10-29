@@ -6,6 +6,7 @@ Um pomodoro flutuante, bonito e minúsculo para Windows, Linux e macOS, com a m�
 
 ![Estilo Clássico](docs/classico.png)
 ![Estilo Fluido](docs/fluido.png)
+![Layout Ilha, fechado e aberto](docs/ilha.png)
 
 - **Leve de verdade:** um único executável (5–10 MB), sem navegador nem WebView por baixo.
   Com o timer parado, não gasta CPU. Rodando, redesenha uma vez por segundo.
@@ -14,10 +15,13 @@ Um pomodoro flutuante, bonito e minúsculo para Windows, Linux e macOS, com a m�
   - **Clássico:** superfícies sólidas e discretas, botões vermelho/amarelo/verde.
   - **Fluido:** gradiente vivo que muda de cor com a fase, vidro, anel com brilho, números que rolam
     e transições suaves. Inspirado em apps como Arc, Raycast e Dia.
-- **Muito personalizável:** 16 temas prontos, todas as cores editáveis, três layouts (Anel, Pílula, Mínimo),
-  tamanho, cantos, opacidade, fonte (do sistema, embutida ou qualquer .ttf), peso dos números,
-  efeito vidro nativo (Windows/macOS), som personalizado e o que aparece ou não na tela.
-- **Tocando agora + letra sincronizada:** mostra a música do sistema (Spotify, navegador, etc.) com a linha
+- **Muito personalizável:** 16 temas prontos, todas as cores editáveis, quatro layouts (Anel, Pílula, Mínimo
+  e Ilha, que se abre ao passar o mouse), tamanho, cantos, opacidade, fonte (Inter embutida, do sistema
+  ou qualquer .ttf), peso dos números, modo Zen, efeito vidro nativo (Windows/macOS) e o que aparece ou não na tela.
+- **Sons próprios:** Sino, Gota, Madeira, Cristal, Acorde, Digital e Tigela tibetana, criados pelo próprio app,
+  um para o fim do foco e outro para o fim da pausa (`cargo run --example dump_sounds -- pasta` grava todos para ouvir).
+- **Tocando agora + letra sincronizada:** mostra a música do sistema (Spotify, navegador, etc.) com a capa,
+  a letra estilo karaokê (ou uma linha só) e, no estilo Fluido, o gradiente com as cores da capa. A linha
   atual da letra, buscada no [LRCLIB](https://lrclib.net) e, se você colar uma chave grátis, no
   [Vagalume](https://www.vagalume.com.br/api/). Controles de anterior, play/pausa e próxima ao passar o mouse.
 - **Histórico:** focos de hoje, sequência de dias, meta diária, gráfico da semana e grade das últimas 16 semanas.
@@ -145,6 +149,8 @@ src/
   render.rs   escolha do renderizador, com planos B, C e D
   logging.rs  log em arquivo e captura de travamentos
   icon.rs     desenho do ícone
+  art.rs      capa do álbum e cores dominantes
+assets/fonts/ Inter (recortada para o alfabeto latino; licença OFL)
 installer/    instalador do Windows (Inno Setup)
 CHANGELOG.md  novidades de cada versão
 ```

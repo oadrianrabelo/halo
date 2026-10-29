@@ -60,6 +60,10 @@ pub struct App {
     next_update_check: Instant,
     /// Reabrir o Halo ao fechar (depois de atualizar).
     relaunch: bool,
+    /// Ilha aberta (mouse em cima ou fase acabando), quando o mouse saiu e quanto ela está aberta (0 a 1).
+    island_open: bool,
+    island_leave: Option<Instant>,
+    island_t: f32,
     /// Textura da capa carregada (identificada pelo endereço do `Art`).
     art_tex: Option<(usize, egui::TextureHandle)>,
     /// Cores do gradiente em transição: de, para, quando começou e a capa de origem.
@@ -133,6 +137,9 @@ impl App {
             next_update_check: now + Duration::from_secs(5),
             relaunch: false,
             art_tex: None,
+            island_open: false,
+            island_leave: None,
+            island_t: 0.0,
             glow: ([Color32::BLACK; 2], [Color32::BLACK; 2], long_ago, usize::MAX),
         }
     }
@@ -238,7 +245,11 @@ impl App {
         !self.settings.music_only_when_playing || m.snapshot().0.is_some()
     }
 
-    fn window_size(&self) -> Vec2 {
+    /// Altura do painel de música (já na escala), ou 0 se ele não aparece.
+    fn music_panel_height(&self) -> f32 {
+        if !self.show_music_panel() {
+            return 0.0;
+        }
         let t = &self.theme;
         let mut panel = MUSIC_PANEL;
         if t.music_art {
@@ -247,8 +258,19 @@ impl App {
         if t.lyrics_style == crate::theme::LyricsStyle::Karaoke && self.settings.lyrics {
             panel += MUSIC_KARAOKE_EXTRA;
         }
-        let extra = if self.show_music_panel() { panel * t.scale } else { 0.0 };
-        self.theme.window_size() + vec2(0.0, extra)
+        panel * t.scale
+    }
+
+    fn window_size(&self) -> Vec2 {
+        if self.theme.layout == LayoutKind::Island {
+            // Aberta (ou ainda fechando): tamanho do cartão; fechada: só a pílula.
+            return if self.island_open || self.island_t > 0.01 {
+                crate::theme::ISLAND_OPEN * self.theme.scale + vec2(0.0, self.music_panel_height())
+            } else {
+                self.theme.window_size()
+            };
+        }
+        self.theme.window_size() + vec2(0.0, self.music_panel_height())
     }
 
     fn corner_radius(&self) -> f32 {
@@ -342,6 +364,9 @@ impl App {
     }
 
     fn draw(&mut self, ui: &mut egui::Ui, now: Instant) {
+        if self.theme.layout == LayoutKind::Island {
+            return self.draw_island(ui, now);
+        }
         let ctx = ui.ctx().clone();
         let full = ui.max_rect();
         // Área do timer; o que sobrar embaixo é o painel de música.
@@ -409,23 +434,27 @@ impl App {
         let lights = if t.traffic_lights || fluid { hover } else { 0.0 };
         let cycles = self.settings.cycles_before_long.max(1);
         let label = self.timer.phase.label();
+        // Modo Zen: detalhes (anel, nome da fase, bolinhas, barra) só aparecem com o mouse em cima.
+        let zen = if t.zen { hover } else { 1.0 };
+        let (track, accent_detail) = (track.gamma_multiply(zen), accent.gamma_multiply(zen));
 
         match t.layout {
+            LayoutKind::Island => unreachable!("a Ilha é desenhada em draw_island"),
             LayoutKind::Ring => {
                 let c = rect.center();
                 if t.show_progress {
                     if fluid {
-                        fluid::glow_ring(&p, c, 70.0 * s, 4.5 * s, progress, track, accent);
+                        fluid::glow_ring(&p, c, 70.0 * s, 4.5 * s, progress, track, accent_detail);
                     } else {
-                        w::ring(&p, c, 72.0 * s, 5.0 * s, progress, track, accent);
+                        w::ring(&p, c, 72.0 * s, 5.0 * s, progress, track, accent_detail);
                     }
                 }
                 let top = c + vec2(0.0, -31.0 * s);
                 if t.show_phase {
                     if fluid {
-                        fluid::chip(&p, top, Align2::CENTER_CENTER, label, 10.5 * s, accent, t.text, dark, 1.0 - lights);
+                        fluid::chip(&p, top, Align2::CENTER_CENTER, label, 10.5 * s, accent, t.text, dark, (1.0 - lights) * zen);
                     } else {
-                        w::caps_label(&p, top, Align2::CENTER_CENTER, label, 10.0 * s, t.secondary.gamma_multiply(1.0 - lights));
+                        w::caps_label(&p, top, Align2::CENTER_CENTER, label, 10.0 * s, t.secondary.gamma_multiply((1.0 - lights) * zen));
                     }
                 }
                 let d = if fluid { 16.0 * s } else { 11.0 * s };
@@ -435,14 +464,14 @@ impl App {
                 w::clock_text(&p, c + vec2(0.0, -3.0 * s), Align2::CENTER_CENTER, &time, &prev, roll, clock(size), t.text);
                 self.controls(ui, c + vec2(0.0, 27.0 * s), 31.0 * s, 24.0 * s, controls, false);
                 if t.show_dots {
-                    let dot_color = t.secondary.gamma_multiply(0.35);
-                    w::dots(&p, c + vec2(0.0, 51.0 * s), cycles, self.timer.completed, 2.5 * s, accent, dot_color);
+                    let dot_color = t.secondary.gamma_multiply(0.35 * zen);
+                    w::dots(&p, c + vec2(0.0, 51.0 * s), cycles, self.timer.completed, 2.5 * s, accent_detail, dot_color);
                 }
             }
             LayoutKind::Pill => {
                 let left = rect.left() + 20.0 * s;
                 let label_y = rect.top() + 18.0 * s;
-                let label_alpha = 1.0 - lights;
+                let label_alpha = (1.0 - lights) * zen;
                 let mut x = left;
                 if t.show_phase {
                     let r = if fluid {
@@ -464,14 +493,14 @@ impl App {
                 let cy = rect.center().y + 2.0 * s;
                 self.controls(ui, pos2(rect.right() - 58.0 * s, cy), 31.0 * s, 28.0 * s, controls, false);
                 if t.show_progress {
-                    bar(&p, rect, 20.0 * s, 8.0 * s, 3.0 * s, progress, track, accent, fluid);
+                    bar(&p, rect, 20.0 * s, 8.0 * s, 3.0 * s, progress, track, accent_detail, fluid);
                 }
             }
             LayoutKind::Minimal => {
                 let c = rect.center() + vec2(0.0, -s);
                 w::clock_text(&p, c, Align2::CENTER_CENTER, &time, &prev, roll, clock(30.0), t.text.gamma_multiply(1.0 - hover));
                 if t.show_progress {
-                    bar(&p, rect, (radius_f * 0.6).max(10.0 * s), 6.0 * s, 2.0 * s, progress, track, accent, fluid);
+                    bar(&p, rect, (radius_f * 0.6).max(10.0 * s), 6.0 * s, 2.0 * s, progress, track, accent_detail, fluid);
                 }
                 self.controls(ui, c + vec2(-12.0 * s, 0.0), 28.0 * s, 24.0 * s, hover, true);
             }
@@ -495,6 +524,148 @@ impl App {
     }
 
     /// Painel "tocando agora": música, artista e a linha atual da letra.
+    /// Layout Ilha: pílula pequena que se abre num cartão ao passar o mouse (e quando uma fase termina).
+    /// A janela cresce na hora; o desenho é que "abre" animado dentro dela, revelando o conteúdo.
+    fn draw_island(&mut self, ui: &mut egui::Ui, now: Instant) {
+        let ctx = ui.ctx().clone();
+        let full = ui.max_rect();
+        let t = self.theme.clone();
+        let s = t.scale;
+        let fluid = t.style == Style::Fluid;
+        let dark = t.is_dark();
+        let accent = self.shown_accent(now, t.accent(self.timer.phase));
+        let running = self.timer.is_running();
+
+        let closed = Rect::from_min_size(full.min, LayoutKind::Island.base_size() * s);
+        let core_size = crate::theme::ISLAND_OPEN * s;
+        let panel_h = self.music_panel_height();
+        let open = Rect::from_min_size(full.min, core_size + vec2(0.0, panel_h));
+        let k = ctx.animate_bool_with_time_and_easing(Id::unique("island"), self.island_open, 0.34, easing::cubic_out);
+        self.island_t = k;
+        let lerp = |a: f32, b: f32| a + (b - a) * k;
+        let shape = Rect::from_min_max(
+            closed.min,
+            pos2(lerp(closed.right(), open.right()).min(full.right()), lerp(closed.bottom(), open.bottom()).min(full.bottom())),
+        );
+
+        // Abre com o mouse em cima (ou no fim de uma fase); fecha um instante depois que o mouse sai.
+        let over = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| shape.expand(2.0).contains(p));
+        let flashing = self.flash_until.is_some_and(|u| now < u);
+        let was_open = self.island_open;
+        if over || flashing {
+            self.island_open = true;
+            self.island_leave = None;
+        } else if self.island_open {
+            let left_at = *self.island_leave.get_or_insert(now);
+            let wait = Duration::from_millis(450);
+            if now - left_at >= wait {
+                self.island_open = false;
+                self.island_leave = None;
+            } else {
+                ctx.request_repaint_after(wait - (now - left_at));
+            }
+        }
+        // A animação deste quadro foi calculada com o estado anterior: pede o próximo quadro para ela andar.
+        if self.island_open != was_open {
+            ctx.request_repaint();
+        }
+
+        let bg = ui.interact(shape, Id::unique("island-bg"), Sense::click_and_drag());
+        if bg.drag_started() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        } else if bg.clicked() {
+            self.timer.toggle(now);
+        }
+        if ctx.input(|i| i.pointer.secondary_clicked()) {
+            self.prefs.open = true;
+        }
+
+        // Fundo no formato atual da ilha.
+        let radius_f = lerp(closed.height() / 2.0, (26.0 * s).min(t.corner_radius.max(14.0) * s));
+        let radius = CornerRadius::same(radius_f.round().min(255.0) as u8);
+        let p = ui.painter().clone();
+        if fluid {
+            let (glow_a, glow_b) = self.glows(now, accent);
+            Backdrop {
+                base: t.background,
+                glow_a,
+                glow_b,
+                opacity: t.opacity,
+                dark,
+                time: (now - self.started).as_secs_f32(),
+                outline: t.outline,
+            }
+            .paint(&p, shape, radius_f);
+        } else {
+            let [r, g, b, _] = t.background.to_array();
+            p.rect_filled(shape, radius, Color32::from_rgba_unmultiplied(r, g, b, (t.opacity * 255.0) as u8));
+            if t.outline {
+                p.rect_stroke(shape.shrink(0.5), radius, Stroke::new(1.0, t.text.gamma_multiply(0.08)), StrokeKind::Inside);
+            }
+        }
+        if let Some(until) = self.flash_until.filter(|u| now < *u) {
+            let a = 0.35 + 0.35 * ((until - now).as_secs_f32() * std::f32::consts::TAU / 1.2).sin();
+            p.rect_stroke(shape.shrink(1.5 * s), radius, Stroke::new(3.0 * s, accent.gamma_multiply(a)), StrokeKind::Inside);
+        }
+
+        let progress = self.timer.progress(&self.settings, now);
+        let roll = self.roll(now);
+        let (time, prev) = (self.clock.shown.clone(), self.clock.prev.clone());
+        let clock = |size: f32| FontId::new(size * s, fonts::clock());
+        let track = t.text.gamma_multiply(if dark { 0.12 } else { 0.15 });
+
+        // Fechada: [capa ou bolinha da fase]  25:00  [anelzinho de progresso]
+        let a0 = (1.0 - k * 1.6).max(0.0);
+        if a0 > 0.01 {
+            let cy = closed.center().y;
+            let mut x = closed.left() + 14.0 * s;
+            let art = if t.music_art && self.media.is_some() { self.art_texture(&ctx) } else { None };
+            if let Some(tex) = art {
+                let r = Rect::from_min_size(pos2(x - 4.0 * s, cy - 14.0 * s), Vec2::splat(28.0 * s));
+                egui::Image::new(&tex).corner_radius(14.0 * s).tint(Color32::WHITE.gamma_multiply(a0)).paint_at(ui, r);
+                x = r.right() + 9.0 * s;
+            } else {
+                p.circle_filled(pos2(x + 2.0 * s, cy), 4.5 * s, accent.gamma_multiply(a0));
+                x += 15.0 * s;
+            }
+            w::clock_text(&p, pos2(x, cy), Align2::LEFT_CENTER, &time, &prev, roll, clock(21.0), t.text.gamma_multiply(a0));
+            let rc = pos2(closed.right() - 22.0 * s, cy);
+            let ring_color = if running { accent } else { accent.gamma_multiply(0.45) };
+            w::ring(&p, rc, 8.5 * s, 2.6 * s, progress, track.gamma_multiply(a0), ring_color.gamma_multiply(a0));
+        }
+
+        // Aberta: o conteúdo é revelado pela forma crescendo (recorte) e aparece suavemente.
+        let a1 = ((k - 0.25) / 0.75).clamp(0.0, 1.0);
+        if a1 > 0.01 {
+            let core = Rect::from_min_size(full.min, core_size);
+            ui.set_clip_rect(shape);
+            let p = ui.painter().clone();
+            let label_y = core.top() + 22.0 * s;
+            let left = core.left() + 20.0 * s;
+            let mut x = left;
+            if fluid {
+                x = fluid::chip(&p, pos2(x - 4.0 * s, label_y), Align2::LEFT_CENTER, self.timer.phase.label(), 10.0 * s, accent, t.text, dark, a1).right();
+            } else {
+                x = w::caps_label(&p, pos2(x, label_y), Align2::LEFT_CENTER, self.timer.phase.label(), 10.0 * s, t.secondary.gamma_multiply(a1)).right();
+            }
+            let cycles = self.settings.cycles_before_long.max(1);
+            let dots_w = (cycles as f32 * 9.0 - 4.0) * s;
+            w::dots(&p, pos2(x + 8.0 * s + dots_w / 2.0, label_y), cycles, self.timer.completed, 2.5 * s, accent.gamma_multiply(a1), t.secondary.gamma_multiply(0.35 * a1));
+            // Botões de janela no canto direito.
+            let d = if fluid { 15.0 * s } else { 11.0 * s };
+            let group_w = if fluid { 3.0 * d + 0.9 * d } else { 3.0 * d + 1.2 * d };
+            self.window_buttons(ui, pos2(core.right() - 18.0 * s - group_w, label_y), d, a1);
+
+            w::clock_text(&p, pos2(left, core.top() + 72.0 * s), Align2::LEFT_CENTER, &time, &prev, roll, clock(44.0), t.text.gamma_multiply(a1));
+            self.controls(ui, pos2(core.right() - 66.0 * s, core.top() + 74.0 * s), 34.0 * s, 32.0 * s, a1, false);
+            bar(&p, core, 20.0 * s, 16.0 * s, 4.0 * s, progress, track.gamma_multiply(a1), accent.gamma_multiply(a1), fluid);
+            if panel_h > 0.0 {
+                let panel = Rect::from_min_size(pos2(core.left(), core.bottom()), vec2(core.width(), panel_h));
+                self.draw_music(ui, panel, now, a1);
+            }
+        }
+    }
+
     /// Cores do gradiente do estilo Fluido: as da capa (se ligado e houver capa) ou as do tema,
     /// com uma transição suave quando a música muda.
     fn glows(&mut self, now: Instant, accent: Color32) -> (Color32, Color32) {
